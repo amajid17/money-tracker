@@ -1,0 +1,4505 @@
+<!DOCTYPE html>
+<!--
+  ╔══════════════════════════════════════════════════════════════╗
+  ║  MONEY TRACKER  —  Personal Spending & Earning PWA          ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║                                                              ║
+  ║  DEPLOY TO NETLIFY DROP (3 steps)                           ║
+  ║  1. Save this file as "index.html" on your computer.        ║
+  ║  2. Go to https://app.netlify.com/drop in any browser.      ║
+  ║  3. Drag and drop index.html onto the page — live instantly. ║
+  ║                                                              ║
+  ║  ADD TO HOME SCREEN — iOS (3 steps)                         ║
+  ║  1. Open your Netlify URL in Safari (not Chrome).           ║
+  ║  2. Tap the Share icon (□↑) at the bottom of the screen.   ║
+  ║  3. Tap "Add to Home Screen", then tap "Add" top-right.     ║
+  ║                                                              ║
+  ║  ADD TO HOME SCREEN — Android (3 steps)                     ║
+  ║  1. Open your Netlify URL in Chrome.                        ║
+  ║  2. Tap the three-dot menu (⋮) in the top-right corner.    ║
+  ║  3. Tap "Add to Home Screen" or "Install App", tap "Add".   ║
+  ║                                                              ║
+  ╚══════════════════════════════════════════════════════════════╝
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <!-- Content Security Policy — deny everything not explicitly allowed.
+       'unsafe-inline' for script/style is required because all JS and CSS
+       live in inline blocks (single-file design; no build step for nonces).
+       External scripts, stylesheets, frames, plugins, and network fetches
+       are all blocked. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none';
+                 script-src  'unsafe-inline';
+                 style-src   'unsafe-inline';
+                 img-src     data: blob:;
+                 manifest-src blob:;
+                 worker-src  'self';
+                 connect-src 'none';
+                 object-src  'none';
+                 base-uri    'self';">
+  <!-- PWA & viewport (required for installability) -->
+  <meta name="viewport"                     content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title"   content="Money Tracker">
+  <meta name="theme-color"                  content="#0f0f1a">
+  <title>Money Tracker</title>
+
+  <!-- Apply saved theme before CSS renders to prevent a flash of dark for
+       light/auto users. Must run before <style> so data-theme is already
+       set when the browser processes the stylesheet. -->
+  <script>
+    (function () {
+      var t = localStorage.getItem('mt_theme') || 'dark';
+      if (t === 'light') document.documentElement.dataset.theme = 'light';
+      else if (t === 'auto') document.documentElement.dataset.theme = 'auto';
+      // 'dark' is the default (:root) — no attribute needed
+    })();
+  </script>
+
+  <style>
+    /* ══════════════════════════════════════════════════════════
+       CSS CUSTOM PROPERTIES
+       Single source of truth for all colours, radii, shadows.
+    ══════════════════════════════════════════════════════════ */
+    :root {
+      /* Palette */
+      --bg:         #0f0f1a;
+      --surface:    #1a1a2e;
+      --border:     #2a2a4a;
+      --accent:     #00d4aa;
+      --income:     #22c55e;
+      --expense:    #ef4444;
+      --text:       #f1f5f9;
+      --muted:      #94a3b8;
+
+      /* Shape & shadow */
+      --radius:     12px;
+      --shadow:     0 4px 24px rgba(0, 0, 0, 0.45);
+
+      /* Typography */
+      --font:       system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      /* iOS safe-area shims */
+      --sat:        env(safe-area-inset-top,    0px);
+      --sab:        env(safe-area-inset-bottom, 0px);
+      --sal:        env(safe-area-inset-left,   0px);
+      --sar:        env(safe-area-inset-right,  0px);
+
+      /* Toast */
+      --toast-bg:   #162032;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       RESET
+    ══════════════════════════════════════════════════════════ */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      overflow-x: hidden;   /* belt-and-suspenders: no horizontal scroll on any device */
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      font-size: 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing:  antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      -webkit-text-size-adjust: 100%;   /* prevent zoom on rotate */
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       APP LAYOUT SKELETON
+       ┌─────────────────────────┐
+       │  #header  (fixed)       │  ← Dashboard metrics
+       ├─────────────────────────┤
+       │  #main    (scrollable)  │  ← Input + History
+       └─────────────────────────┘
+    ══════════════════════════════════════════════════════════ */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      max-width: 480px;         /* keep readable on tablets */
+      margin: 0 auto;
+    }
+
+    #header {
+      flex-shrink: 0;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      /* Respect the iOS notch */
+      padding: calc(var(--sat) + 14px) calc(var(--sar) + 16px) 14px calc(var(--sal) + 16px);
+      z-index: 10;
+    }
+
+    #main {
+      flex: 1;
+      overflow-y: auto;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior: contain;
+      /* Extra bottom padding so content clears the home bar on iOS */
+      padding: 16px 16px calc(16px + var(--sab));
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       CARDS
+    ══════════════════════════════════════════════════════════ */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       BUTTONS  (all min 44 × 44 px for touch targets)
+    ══════════════════════════════════════════════════════════ */
+    button {
+      font-family: var(--font);
+      font-size: 1rem;
+      line-height: 1;
+      border: none;
+      outline: none;          /* suppressed for mouse; restored below for keyboard */
+      cursor: pointer;
+      min-height: 44px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    /* Visible focus ring for keyboard / switch navigation (WCAG 2.1 AA) */
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* Solid primary action */
+    .btn-primary {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 48px;
+      background: var(--accent);
+      color: #0f0f1a;
+      font-weight: 700;
+      font-size: 1rem;
+      border-radius: 8px;
+      transition: opacity 0.15s;
+      letter-spacing: 0.01em;
+    }
+    .btn-primary:active { opacity: 0.75; }
+
+    /* Inline ghost / text link */
+    .btn-ghost {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: transparent;
+      color: var(--accent);
+      font-size: 0.875rem;
+      min-height: 44px;
+      padding: 0;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    /* Small icon button (edit / delete rows) */
+    .btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1rem;
+      min-height: 44px;
+      min-width:  44px;
+      border-radius: 8px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .btn-icon:active            { background: var(--border); color: var(--text);    }
+    .btn-icon.danger:active     { background: var(--border); color: var(--expense); }
+
+    /* ── Hover states (pointer devices only — no sticky highlights on touch) ── */
+    @media (hover: hover) {
+      /* Primary / Add — gentle brightness lift instead of opacity drop */
+      .btn-primary:hover,
+      .btn-add:hover             { filter: brightness(1.08); }
+
+      /* Ghost link — drop underline on hover so it feels like a button */
+      .btn-ghost:hover           { text-decoration: none; opacity: 0.8; }
+
+      /* Icon buttons — reveal a background chip on hover */
+      .btn-icon:hover            { background: var(--border); color: var(--text);    }
+      .btn-icon.danger:hover     { background: var(--border); color: var(--expense); }
+
+      /* Dashboard text buttons */
+      .btn-edit-balance:hover    { color: var(--accent); }
+      .wallet-selector-btn:hover { border-color: var(--accent); }
+
+      /* Period toggle — hint that inactive pills are clickable */
+      .period-btn:hover:not(.active) {
+        background: var(--surface);
+        color: var(--muted);
+      }
+
+      /* Inline confirm buttons */
+      .btn-confirm-cancel:hover  { filter: brightness(1.12); }
+      .btn-confirm-delete:hover  { filter: brightness(1.12); }
+      .btn-confirm-restore:hover { filter: brightness(1.08); }
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       FORM ELEMENTS
+    ══════════════════════════════════════════════════════════ */
+    input, select, textarea {
+      font-family: var(--font);
+      font-size: 1rem;
+      color: var(--text);
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 0 14px;
+      width: 100%;
+      height: 48px;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+      transition: border-color 0.15s;
+    }
+    input:focus-visible, select:focus-visible, textarea:focus-visible {
+      border-color: var(--accent);
+    }
+    input::placeholder { color: var(--muted); }
+
+    /* Chevron for <select> */
+    select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 38px;
+    }
+    select option { background: var(--surface); color: var(--text); }
+
+    textarea {
+      height: auto;
+      min-height: 80px;
+      padding: 12px 14px;
+      resize: vertical;
+    }
+
+    /* Labelled field wrapper */
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .form-group label {
+      font-size: 0.73rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    /* Stack multiple form-groups with consistent spacing */
+    .form-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    /* Two-column row (used inside forms) */
+    .form-row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    /* Inline error below a field */
+    .field-error {
+      font-size: 0.8rem;
+      color: var(--expense);
+      margin-top: 2px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       MODAL OVERLAY
+    ══════════════════════════════════════════════════════════ */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      z-index: 50;
+    }
+
+    .modal-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+      width: 100%;
+      max-width: 420px;
+      max-height: 88vh;
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .modal-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 20px;
+      padding-right: 36px;   /* room for ✕ */
+    }
+
+    .modal-close {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      background: transparent;
+      color: var(--muted);
+      font-size: 1.2rem;
+      min-height: 44px;
+      min-width: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    .modal-close:hover,
+    .modal-close:active { color: var(--text); background: var(--border); }
+
+    /* ══════════════════════════════════════════════════════════
+       TOAST NOTIFICATIONS
+       Fixed bottom-centre, slide up → fade out after 2 s
+    ══════════════════════════════════════════════════════════ */
+    #toast-container {
+      position: fixed;
+      bottom: calc(24px + var(--sab));
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      display: flex;
+      flex-direction: column-reverse;
+      align-items: center;
+      gap: 8px;
+      pointer-events: none;
+      width: calc(100% - 32px);
+      max-width: 448px;
+    }
+
+    .toast {
+      background: var(--toast-bg);
+      color: var(--text);
+      border: 1px solid var(--accent);
+      border-radius: 100px;
+      padding: 10px 22px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+      animation:
+        toast-in  0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both,
+        toast-out 0.3s  ease 1.7s forwards;
+    }
+    .toast.toast-error { border-color: var(--expense); }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(14px) scale(0.94); }
+      to   { opacity: 1; transform: translateY(0)    scale(1);    }
+    }
+    @keyframes toast-out {
+      from { opacity: 1; transform: translateY(0); }
+      to   { opacity: 0; transform: translateY(8px); }
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       CATEGORY PILL / BADGE
+    ══════════════════════════════════════════════════════════ */
+    .pill {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 2px 8px;
+      border-radius: 100px;
+      background: rgba(42, 42, 74, 0.95);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       SECTION DATE HEADERS (sticky inside history scroll)
+    ══════════════════════════════════════════════════════════ */
+    .date-header {
+      position: sticky;
+      top: 0;
+      background: var(--bg);
+      padding: 6px 0 4px;
+      font-size: 0.73rem;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      z-index: 5;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       TRANSACTION ROW
+    ══════════════════════════════════════════════════════════ */
+    .tx-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      border-left-width: 4px;
+      margin-bottom: 6px;
+    }
+    .tx-row.income-row  { border-left-color: var(--income);  }
+    .tx-row.expense-row { border-left-color: var(--expense); }
+
+    .tx-body {
+      flex: 1;
+      min-width: 0;           /* allow text-overflow to work */
+    }
+    .tx-desc {
+      font-size: 0.9rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tx-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 3px;
+    }
+    .tx-actions {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-shrink: 0;
+    }
+    .tx-amount {
+      font-size: 0.95rem;
+      font-weight: 700;
+      flex-shrink: 0;
+      margin-right: 4px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       DASHBOARD STAT CARDS (side-by-side pair)
+    ══════════════════════════════════════════════════════════ */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .stat-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .stat-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .stat-value {
+      font-size: 1.15rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+    }
+
+    .period-toggle {
+      display: flex;
+      gap: 3px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      margin-top: 10px;
+    }
+    .period-btn {
+      flex: 1;
+      height: 32px;
+      min-height: 32px;
+      font-family: var(--font);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 5px;
+      border: none;
+      cursor: pointer;
+      background: transparent;
+      color: var(--muted);
+      transition: background 0.15s, color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .period-btn.active { background: var(--surface); color: var(--text); }
+    .period-btn:active { opacity: 0.7; }
+
+    /* ── Inline delete confirmation (replaces window.confirm) ─────── */
+    .tx-row.is-confirming       { background: rgba(239,68,68,0.06); }
+    .wallet-item.is-confirming  { background: rgba(239,68,68,0.06); border-radius: 8px; }
+    .btn-confirm-cancel,
+    .btn-confirm-delete {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0 10px;
+      height: 34px;
+      min-height: 34px;
+      border-radius: 6px;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+    .btn-confirm-cancel  { background: var(--border);  color: var(--text); }
+    .btn-confirm-delete  { background: var(--expense); color: #fff; }
+    .btn-confirm-restore { background: var(--accent);  color: #0f0f1a; }
+    .wallet-confirm-note {
+      font-size: 0.72rem;
+      color: var(--expense);
+      white-space: nowrap;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       UTILITY HELPERS
+    ══════════════════════════════════════════════════════════ */
+    .hidden         { display: none !important; }
+    .invisible      { visibility: hidden; }        /* reserves space, avoids layout shift */
+    .text-income    { color: var(--income);  }
+    .text-expense   { color: var(--expense); }
+    .text-accent    { color: var(--accent);  }
+    .text-muted     { color: var(--muted);   }
+    .text-center    { text-align: center;    }
+    .font-bold      { font-weight: 700;      }
+    .mt-8           { margin-top: 8px;       }
+    .mt-12          { margin-top: 12px;      }
+
+    /* ══════════════════════════════════════════════════════════
+       THIN SCROLLBAR (desktop)
+    ══════════════════════════════════════════════════════════ */
+    #main::-webkit-scrollbar,
+    .modal-card::-webkit-scrollbar { width: 4px; }
+    #main::-webkit-scrollbar-track,
+    .modal-card::-webkit-scrollbar-track { background: transparent; }
+    #main::-webkit-scrollbar-thumb,
+    .modal-card::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+    /* ══════════════════════════════════════════════════════════
+       SMART INPUT  —  text field + "Add" button side by side
+    ══════════════════════════════════════════════════════════ */
+    .smart-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+    }
+    .smart-row input { flex: 1; min-width: 0; }
+
+    /* Compact "Add" button — same height as inputs (48 px) */
+    .btn-add {
+      flex-shrink: 0;
+      width: 64px;
+      height: 48px;
+      background: var(--accent);
+      color: #0f0f1a;
+      font-weight: 700;
+      font-size: 0.95rem;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.15s;
+    }
+    .btn-add:active { opacity: 0.75; }
+
+    /* "⚠ assumed expense" badge — rendered inside a transaction row */
+    .assumed-badge {
+      display: inline-block;
+      font-size: 0.67rem;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(239, 68, 68, 0.15);
+      color: var(--expense);
+      white-space: nowrap;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    /* Toggle-link row below the smart input or manual form */
+    .toggle-row { margin-top: 10px; }
+
+    /* ══════════════════════════════════════════════════════════
+       DASHBOARD  —  header top row, balance, stat cards, net
+    ══════════════════════════════════════════════════════════ */
+    .header-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    .dashboard-balance-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .balance-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      margin-bottom: 2px;
+    }
+
+    .balance-amount {
+      font-size: 2rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+    }
+
+    .balance-positive { color: var(--text);    }
+    .balance-negative { color: var(--expense); }
+
+    /* Small muted "✏ Edit balance" link in the header */
+    .btn-edit-balance {
+      flex-shrink: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.73rem;
+      padding: 0;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      white-space: nowrap;
+      transition: color 0.15s;
+    }
+    .btn-edit-balance:active { color: var(--accent); }
+
+    .net-label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .net-value { font-weight: 700; }
+
+    /* ══════════════════════════════════════════════════════════
+       WALLET SELECTOR  —  tappable pill in the dashboard header
+    ══════════════════════════════════════════════════════════ */
+    .wallet-selector-row { margin-bottom: 12px; }
+
+    .wallet-selector-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      padding: 0 12px;
+      height: 44px;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-weight: 700;
+      max-width: 100%;
+      transition: border-color 0.15s;
+    }
+    .wallet-selector-btn:active { border-color: var(--accent); }
+
+    .wallet-selector-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wallet-selector-caret { color: var(--muted); font-size: 0.75rem; flex-shrink: 0; }
+
+    /* ══════════════════════════════════════════════════════════
+       WALLET LIST  —  rows inside #modal-wallets
+    ══════════════════════════════════════════════════════════ */
+    .wallet-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .wallet-item:last-child { border-bottom: none; }
+
+    .wallet-item-body { flex: 1; min-width: 0; }
+
+    .wallet-item-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .wallet-active-dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      flex-shrink: 0;
+    }
+    .wallet-item-bal {
+      font-size: 0.8rem;
+      margin-top: 2px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       EXPORT PICKER  —  wallet checkbox rows in #modal-export
+    ══════════════════════════════════════════════════════════ */
+
+    /* Reset the global height/appearance override for checkboxes */
+    input[type="checkbox"] {
+      appearance: auto;
+      -webkit-appearance: auto;
+      width: 20px;
+      height: 20px;
+      min-height: unset;
+      padding: 0;
+      border: none;
+      background: transparent;
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: none;
+    }
+
+    .export-wallet-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .export-wallet-row:last-child { border-bottom: none; }
+
+    .export-check-body { flex: 1; min-width: 0; }
+    .export-check-name { font-size: 0.95rem; font-weight: 600; color: var(--text); }
+    .export-check-meta { font-size: 0.78rem; color: var(--muted); margin-top: 2px; }
+
+    /* ══════════════════════════════════════════════════════════
+       HISTORY  —  empty state placeholder
+    ══════════════════════════════════════════════════════════ */
+    .empty-state {
+      text-align: center;
+      padding: 48px 20px;
+      color: var(--muted);
+    }
+    .empty-state p + p { margin-top: 6px; }
+
+    /* ══════════════════════════════════════════════════════════
+       LIGHT THEME
+       Toggled by data-theme="light" on <html>
+    ══════════════════════════════════════════════════════════ */
+    [data-theme="light"] {
+      --bg:       #f1f5f9;
+      --surface:  #ffffff;
+      --border:   #e2e8f0;
+      --text:     #0f172a;
+      --muted:    #64748b;
+      --shadow:   0 4px 24px rgba(0,0,0,0.10);
+      --toast-bg: #1e293b;
+    }
+    [data-theme="light"] .date-header { background: var(--bg); }
+    /* Re-tint the select chevron for light backgrounds */
+    [data-theme="light"] select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       AUTO THEME  (follows OS preference)
+       data-theme="auto" + prefers-color-scheme: light → light vars
+    ══════════════════════════════════════════════════════════ */
+    @media (prefers-color-scheme: light) {
+      [data-theme="auto"] {
+        --bg:       #f1f5f9;
+        --surface:  #ffffff;
+        --border:   #e2e8f0;
+        --text:     #0f172a;
+        --muted:    #64748b;
+        --shadow:   0 4px 24px rgba(0,0,0,0.10);
+        --toast-bg: #1e293b;
+      }
+      [data-theme="auto"] .date-header { background: var(--bg); }
+      [data-theme="auto"] select {
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2364748b' stroke-width='1.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      }
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       MODAL ANIMATIONS
+       Open  : plays when .hidden is removed
+       Close : add .is-closing, hidden added after 180 ms
+    ══════════════════════════════════════════════════════════ */
+    .modal-backdrop:not(.hidden) {
+      animation: modal-bd-in 0.2s ease both;
+    }
+    .modal-backdrop.is-closing {
+      animation: modal-bd-out 0.18s ease both !important;
+    }
+    .modal-backdrop:not(.hidden) .modal-card {
+      animation: modal-card-in 0.25s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    .modal-backdrop.is-closing .modal-card {
+      animation: modal-card-out 0.18s ease both !important;
+    }
+    @keyframes modal-bd-in   { from{opacity:0}  to{opacity:1} }
+    @keyframes modal-bd-out  { from{opacity:1}  to{opacity:0} }
+    @keyframes modal-card-in {
+      from { opacity:0; transform:translateY(22px) scale(0.96); }
+      to   { opacity:1; transform:translateY(0)    scale(1);    }
+    }
+    @keyframes modal-card-out {
+      from { opacity:1; transform:translateY(0)    scale(1);    }
+      to   { opacity:0; transform:translateY(10px) scale(0.97); }
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       SETTINGS BUTTON  (header gear icon)
+    ══════════════════════════════════════════════════════════ */
+    .settings-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: var(--muted);
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      transition: color 0.15s, background 0.15s;
+    }
+    .settings-btn:active { background: var(--border); color: var(--text); }
+    @media (hover:hover) { .settings-btn:hover { background: var(--border); color: var(--text); } }
+
+    /* ══════════════════════════════════════════════════════════
+       SETTINGS LIST  (rows inside #modal-settings)
+    ══════════════════════════════════════════════════════════ */
+    .settings-list {
+      display: flex;
+      flex-direction: column;
+      margin-top: -8px;
+    }
+    .settings-item {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      width: 100%;
+      padding: 15px 4px;
+      background: transparent;
+      color: var(--text);
+      font-size: 0.95rem;
+      font-weight: 500;
+      border-bottom: 1px solid var(--border);
+      border-radius: 0;
+      min-height: 52px;
+      text-align: left;
+      transition: background 0.12s, border-radius 0.12s;
+    }
+    .settings-item:last-child { border-bottom: none; }
+    .settings-item:active     { background: var(--border); border-radius: 8px; }
+    @media (hover:hover) {
+      .settings-item:hover { background: rgba(255,255,255,0.04); border-radius: 8px; }
+      [data-theme="light"] .settings-item:hover { background: rgba(0,0,0,0.04); }
+    }
+    .settings-item.danger { color: var(--expense); }
+    .settings-item-icon   { font-size: 1.2rem; flex-shrink:0; width:26px; text-align:center; }
+    .settings-item-label  { flex: 1; }
+    .settings-item-caret  { color: var(--muted); font-size: 1rem; }
+    .settings-item-value  { color: var(--muted); font-size: 0.85rem; font-weight: 400; }
+
+    /* Inline reset-data confirm box */
+    .settings-confirm {
+      background: rgba(239,68,68,0.07);
+      border: 1px solid rgba(239,68,68,0.22);
+      border-radius: 10px;
+      padding: 14px;
+      margin: 6px 0 4px;
+    }
+    .settings-confirm p {
+      font-size: 0.85rem;
+      color: var(--text);
+      line-height: 1.5;
+      margin-bottom: 12px;
+    }
+    .settings-confirm-btns { display: flex; gap: 8px; }
+    .settings-confirm-btns .btn-confirm-cancel,
+    .settings-confirm-btns .btn-confirm-delete,
+    .settings-confirm-btns .btn-confirm-restore { flex: 1; }
+
+    /* ══════════════════════════════════════════════════════════
+       SWIPE-TO-ACTION  (reveal Edit / Delete on horizontal swipe)
+    ══════════════════════════════════════════════════════════ */
+    .tx-swipe-wrap {
+      position: relative;
+      overflow: hidden;
+      border-radius: 10px;
+      margin-bottom: 6px;
+    }
+    .tx-swipe-bg {
+      position: absolute;
+      top: 0; bottom: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 22px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+    .tx-swipe-bg-edit   { left:0;  background: var(--accent);  color: #0f0f1a; border-radius: 10px 0 0 10px; }
+    .tx-swipe-bg-delete { right:0; background: var(--expense); color: #fff;    border-radius: 0 10px 10px 0; }
+    .tx-swipe-item {
+      position: relative;
+      will-change: transform;
+      border-radius: 10px;
+      margin-bottom: 0;
+      touch-action: pan-y;
+      user-select: none;
+      -webkit-user-select: none;
+      background: var(--surface);
+    }
+    .tx-swipe-item.snap-back { transition: transform 0.28s cubic-bezier(0.25,1,0.5,1); }
+
+    /* ══════════════════════════════════════════════════════════
+       PULL-TO-REFRESH
+    ══════════════════════════════════════════════════════════ */
+    #ptr-indicator {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 0;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 0.78rem;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+    #ptr-indicator svg { transition: transform 0.25s ease; }
+    #ptr-indicator.ptr-ready { color: var(--accent); }
+    #ptr-indicator.ptr-ready svg { transform: rotate(180deg); }
+
+    /* ══════════════════════════════════════════════════════════
+       BALANCE POP ANIMATION
+    ══════════════════════════════════════════════════════════ */
+    @keyframes balance-pop {
+      0%   { transform: scale(1);    }
+      45%  { transform: scale(1.07); }
+      100% { transform: scale(1);    }
+    }
+    .balance-amount.balance-changed {
+      animation: balance-pop 0.38s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       CHART SECTION
+    ══════════════════════════════════════════════════════════ */
+    .chart-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+    .chart-wrap {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .donut-wrap { flex-shrink: 0; }
+
+    .chart-legend {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+    }
+    .legend-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .legend-name {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+    }
+    .legend-vals {
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+      align-items: center;
+    }
+    .legend-pct {
+      color: var(--muted);
+      font-size: 0.7rem;
+      min-width: 28px;
+      text-align: right;
+    }
+    .legend-amt {
+      color: var(--expense);
+      font-weight: 700;
+      min-width: 52px;
+      text-align: right;
+    }
+    .chart-empty {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 4px 0 8px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       HISTORY HEADER + FILTER BAR
+    ══════════════════════════════════════════════════════════ */
+    .history-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2px;
+    }
+    .history-heading {
+      font-size: 0.73rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .btn-filter-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      background: transparent;
+      color: var(--muted);
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 8px;
+      transition: color 0.15s, background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn-filter-toggle:active,
+    .btn-filter-toggle.is-open { background: var(--border); color: var(--text); }
+    .btn-filter-toggle.has-filters { color: var(--accent); }
+    @media (hover: hover) {
+      .btn-filter-toggle:hover { background: var(--border); color: var(--text); }
+    }
+    /* Active-filter dot */
+    .btn-filter-toggle.has-filters::after {
+      content: '';
+      position: absolute;
+      top: 8px; right: 8px;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .filter-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 14px 16px;
+    }
+    .filter-search-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+    }
+    .filter-search-icon {
+      position: absolute;
+      left: 13px;
+      color: var(--muted);
+      pointer-events: none;
+      flex-shrink: 0;
+    }
+    /* Override global input padding to make room for icon + clear btn */
+    .filter-input {
+      padding-left: 38px;
+      padding-right: 40px;
+    }
+    .filter-clear-btn {
+      position: absolute;
+      right: 0;
+      background: transparent;
+      color: var(--muted);
+      min-height: 44px;
+      min-width: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      border-radius: 0 8px 8px 0;
+      transition: color 0.15s;
+    }
+    @media (hover: hover) { .filter-clear-btn:hover { color: var(--text); } }
+
+    .filter-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .filter-chips {
+      display: flex;
+      gap: 3px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      flex-shrink: 0;
+    }
+    .filter-chip {
+      height: 32px;
+      min-height: 32px;
+      padding: 0 10px;
+      font-family: var(--font);
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--muted);
+      transition: background 0.15s, color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .filter-chip.active { background: var(--surface); color: var(--text); }
+    .filter-chip:active { opacity: 0.7; }
+    @media (hover: hover) {
+      .filter-chip:hover:not(.active) { background: var(--surface); color: var(--muted); }
+    }
+
+    /* Compact category select — overrides global 48 px height */
+    .filter-cat-select {
+      flex: 1;
+      min-width: 0;
+      height: 38px;
+      min-height: 38px;
+      font-size: 0.8rem;
+      padding: 0 30px 0 10px;
+    }
+
+    .filter-results-note {
+      font-size: 0.73rem;
+      color: var(--muted);
+      padding: 2px 2px 0;
+      letter-spacing: 0.02em;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       CUSTOM CATEGORIES (settings panel)
+    ══════════════════════════════════════════════════════════ */
+    .settings-cat-panel {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      padding: 12px 14px 14px;
+      margin-top: -6px;
+      margin-bottom: 8px;
+    }
+    .settings-cat-list {
+      display: flex;
+      flex-direction: column;
+      margin-bottom: 10px;
+    }
+    .settings-cat-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 7px 2px;
+      border-bottom: 1px solid var(--border);
+    }
+    .settings-cat-item:last-child { border-bottom: none; }
+    .settings-cat-icon { font-size: 1rem; flex-shrink: 0; }
+    .settings-cat-name { flex: 1; font-size: 0.87rem; color: var(--text); }
+    .settings-cat-delete {
+      background: transparent;
+      color: var(--muted);
+      min-width: 36px; min-height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      transition: color 0.15s, background 0.15s;
+    }
+    .settings-cat-delete:active { color: var(--expense); background: var(--surface); }
+    @media (hover: hover) {
+      .settings-cat-delete:hover { color: var(--expense); background: var(--surface); }
+    }
+    .settings-cat-empty {
+      color: var(--muted); font-size: 0.8rem; padding: 4px 0 6px;
+    }
+    .settings-add-cat-row {
+      display: flex; gap: 8px; align-items: center;
+    }
+    .settings-add-cat-row input {
+      flex: 1; height: 40px; min-height: 40px;
+      font-size: 0.85rem; padding: 0 12px;
+    }
+    .btn-add-cat {
+      height: 40px; min-height: 40px;
+      padding: 0 16px;
+      font-family: var(--font);
+      font-size: 0.82rem; font-weight: 700;
+      background: var(--accent); color: #000;
+      border-radius: 8px;
+      transition: opacity 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-add-cat:active { opacity: 0.8; }
+    @media (hover: hover) { .btn-add-cat:hover { opacity: 0.85; } }
+
+    /* ══════════════════════════════════════════════════════════
+       RECURRING TRANSACTIONS (settings panel)
+    ══════════════════════════════════════════════════════════ */
+    .rec-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 2px;
+      border-bottom: 1px solid var(--border);
+    }
+    .rec-item:last-child { border-bottom: none; }
+    .rec-item.rec-paused { opacity: 0.5; }
+    .rec-item-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .rec-item-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .rec-item-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .rec-pause-btn {
+      background: transparent;
+      color: var(--muted);
+      min-width: 32px; min-height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      transition: color 0.15s, background 0.15s;
+      flex-shrink: 0;
+    }
+    .rec-pause-btn:active,
+    .rec-pause-btn:hover { background: var(--surface); color: var(--accent); }
+
+    .settings-rec-add {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border);
+      margin-top: 4px;
+    }
+    .settings-rec-add input[type="text"],
+    .settings-rec-add select {
+      height: 40px; min-height: 40px;
+      font-size: 0.83rem;
+      padding: 0 12px;
+    }
+    .rec-add-row {
+      display: flex;
+      gap: 6px;
+    }
+    .rec-add-row input[type="number"] {
+      flex: 1; min-width: 0;
+    }
+    .rec-add-row select { flex-shrink: 0; }
+    .rec-add-date-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .rec-add-date-row label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .rec-add-date-row input[type="date"] {
+      flex: 1; height: 40px; min-height: 40px;
+      font-size: 0.83rem; padding: 0 10px;
+    }
+
+    /* ══════════════════════════════════════════════════════════
+       LOAD MORE
+    ══════════════════════════════════════════════════════════ */
+    .load-more-wrap {
+      display: flex;
+      justify-content: center;
+      padding: 18px 0 10px;
+    }
+    .btn-load-more {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      border-radius: 20px;
+      padding: 9px 20px;
+      font-family: var(--font);
+      font-size: 0.78rem;
+      font-weight: 600;
+      transition: color 0.15s, border-color 0.15s, background 0.15s;
+      -webkit-tap-highlight-color: transparent;
+      cursor: pointer;
+    }
+    .btn-load-more:active { background: var(--border); }
+    @media (hover: hover) {
+      .btn-load-more:hover { color: var(--text); border-color: var(--accent); }
+    }
+    .load-more-remain {
+      color: var(--muted);
+      font-weight: 400;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- ╔═══════════════════════════════════════════════════════════╗
+       ║  APP SHELL                                               ║
+       ║                                                          ║
+       ║  #app                                                    ║
+       ║  ├─ #header   (fixed, never scrolls)                    ║
+       ║  └─ #main     (flex-1, overflow-y scroll)               ║
+       ╚═══════════════════════════════════════════════════════════╝ -->
+  <div id="app">
+
+    <!-- ── FIXED HEADER  (Dashboard) ── -->
+    <header id="header">
+      <div class="header-top">
+        <h1 style="font-size:1.1rem; font-weight:800; letter-spacing:-0.02em;">
+          💰 Money Tracker
+        </h1>
+        <button id="btn-settings" class="settings-btn" aria-label="Settings">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+      <!-- Populated on every renderApp() call by renderDashboard() -->
+      <div id="dashboard-content"></div>
+    </header>
+
+    <!-- ── SCROLLABLE MAIN ── -->
+    <main id="main">
+
+      <!-- Pull-to-refresh indicator (lives at top of scroll area) -->
+      <div id="ptr-indicator" aria-hidden="true">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <path d="M12 5v14M5 12l7 7 7-7"/>
+        </svg>
+        Pull down to refresh
+      </div>
+
+      <!-- Input card (Phase 3) -->
+      <section id="input-section" class="card">
+
+        <!-- ── SMART INPUT (default mode) ───────────────────── -->
+        <div id="smart-input-wrap">
+          <div class="smart-row">
+            <input type="text"
+                   id="smart-input"
+                   placeholder="e.g. coffee $4 yesterday, rent $800 last Friday"
+                   autocomplete="off"
+                   autocorrect="off"
+                   autocapitalize="sentences"
+                   spellcheck="false"
+                   aria-label="Smart transaction input">
+            <button class="btn-add" id="btn-smart-submit" aria-label="Add transaction">
+              Add
+            </button>
+          </div>
+          <!-- Inline error (shown on parse failure) -->
+          <span class="field-error hidden" id="smart-input-error" role="alert"></span>
+          <div class="toggle-row">
+            <button class="btn-ghost" id="btn-to-manual">Switch to Manual Entry</button>
+          </div>
+        </div>
+
+        <!-- ── MANUAL FORM (hidden by default) ──────────────── -->
+        <div id="manual-form-wrap" class="hidden">
+          <div class="form-stack">
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label for="manual-date">Date</label>
+                <input type="date" id="manual-date" autocomplete="off">
+              </div>
+              <div class="form-group">
+                <label for="manual-type">Type</label>
+                <select id="manual-type">
+                  <option value="expense">Expense</option>
+                  <option value="income">Income</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="manual-amount">Amount ($)</label>
+              <input type="number"
+                     id="manual-amount"
+                     placeholder="0.00"
+                     step="0.01"
+                     min="0.01"
+                     inputmode="decimal"
+                     autocomplete="off">
+            </div>
+
+            <div class="form-group">
+              <label for="manual-desc">Description</label>
+              <input type="text"
+                     id="manual-desc"
+                     placeholder="e.g. Lunch at work"
+                     autocomplete="off"
+                     autocorrect="off">
+            </div>
+
+            <div class="form-group">
+              <label for="manual-category">Category</label>
+              <select id="manual-category">
+                <!-- populated by refreshCategorySelects() -->
+              </select>
+            </div>
+
+            <button class="btn-primary" id="btn-manual-submit">Add Transaction</button>
+            <span class="field-error hidden" id="manual-form-error" role="alert"></span>
+          </div>
+
+          <div class="toggle-row">
+            <button class="btn-ghost" id="btn-to-smart">Switch to Smart Input</button>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- Expense breakdown chart — populated by renderChart() -->
+      <section id="chart-section"></section>
+
+      <!-- History header (stable — not rebuilt on render) -->
+      <div id="history-header" class="history-header">
+        <span class="history-heading">History</span>
+        <button class="btn-filter-toggle" id="btn-filter-toggle"
+                aria-label="Search and filter transactions" aria-expanded="false">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="6" x2="20" y2="6"/>
+            <line x1="8" y1="12" x2="16" y2="12"/>
+            <line x1="11" y1="18" x2="13" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
+      <!-- Filter panel (stable — toggled by btn-filter-toggle) -->
+      <div id="filter-panel" class="filter-panel card hidden">
+        <div class="filter-search-wrap">
+          <svg class="filter-search-icon" width="15" height="15" viewBox="0 0 24 24"
+               fill="none" stroke="currentColor" stroke-width="2.5"
+               stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="8"/>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="text" id="filter-input" class="filter-input"
+                 placeholder="Search description or category…"
+                 autocomplete="off" autocorrect="off" spellcheck="false"
+                 aria-label="Search transactions">
+          <button class="filter-clear-btn hidden" id="filter-clear"
+                  aria-label="Clear search">✕</button>
+        </div>
+        <div class="filter-row">
+          <div class="filter-chips" role="group" aria-label="Filter by type">
+            <button class="filter-chip active" data-ftype="all">All</button>
+            <button class="filter-chip" data-ftype="income">Income</button>
+            <button class="filter-chip" data-ftype="expense">Expenses</button>
+          </div>
+          <select id="filter-category" class="filter-cat-select" aria-label="Filter by category">
+            <!-- populated by refreshCategorySelects() -->
+          </select>
+        </div>
+      </div>
+
+      <!-- Transaction history — populated by renderHistory() (§10) -->
+      <section id="history-section"></section>
+
+    </main>
+  </div><!-- /#app -->
+
+
+  <!-- ╔═══════════════════════════════════════════════════════════╗
+       ║  MODALS  (hidden by default; JS toggles .hidden)        ║
+       ╚═══════════════════════════════════════════════════════════╝ -->
+
+  <!-- Starting Balance modal (Phase 2 — one-time setup) -->
+  <div id="modal-balance"
+       class="modal-backdrop hidden"
+       role="dialog" aria-modal="true" aria-labelledby="modal-balance-title">
+    <div class="modal-card" id="modal-balance-card">
+      <!-- ✕ hidden on first launch, shown in edit mode -->
+      <button class="modal-close hidden" id="btn-modal-balance-close" aria-label="Close">✕</button>
+
+      <p class="modal-title" id="modal-balance-title">💰 Welcome to Money Tracker</p>
+      <p id="modal-balance-subtitle"
+         style="color:var(--muted); font-size:0.875rem; line-height:1.5; margin-bottom:20px; margin-top:-10px;">
+        Enter your current wallet balance so your running total starts from the right number.
+      </p>
+
+      <div class="form-stack">
+        <div class="form-group" id="balance-modal-name-group">
+          <label for="input-wallet-name">Wallet Name</label>
+          <input type="text"
+                 id="input-wallet-name"
+                 placeholder="e.g. Cash, Savings, Business"
+                 autocomplete="off"
+                 autocorrect="off"
+                 autocapitalize="words">
+        </div>
+        <div class="form-group">
+          <label for="input-starting-balance">Starting Balance ($)</label>
+          <input type="number"
+                 id="input-starting-balance"
+                 placeholder="0.00"
+                 step="0.01"
+                 min="0"
+                 inputmode="decimal"
+                 autocomplete="off">
+          <span class="field-error hidden" id="balance-modal-error"></span>
+        </div>
+        <button class="btn-primary" id="btn-set-balance">Create Wallet &amp; Get Started</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Transaction modal (Phase 5) -->
+  <div id="modal-edit"
+       class="modal-backdrop hidden"
+       role="dialog" aria-modal="true" aria-labelledby="modal-edit-title">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-modal-edit-close" aria-label="Close modal">✕</button>
+      <p class="modal-title" id="modal-edit-title">✏ Edit Transaction</p>
+
+      <div class="form-stack">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="edit-date">Date</label>
+            <input type="date" id="edit-date" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label for="edit-type">Type</label>
+            <select id="edit-type">
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="edit-amount">Amount ($)</label>
+          <input type="number"
+                 id="edit-amount"
+                 placeholder="0.00"
+                 step="0.01"
+                 min="0.01"
+                 inputmode="decimal"
+                 autocomplete="off">
+        </div>
+
+        <div class="form-group">
+          <label for="edit-desc">Description</label>
+          <input type="text"
+                 id="edit-desc"
+                 placeholder="e.g. Lunch at work"
+                 autocomplete="off"
+                 autocorrect="off">
+        </div>
+
+        <div class="form-group">
+          <label for="edit-category">Category</label>
+          <select id="edit-category">
+            <!-- populated by refreshCategorySelects() -->
+          </select>
+        </div>
+
+        <button class="btn-primary" id="btn-edit-save">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+
+  <!-- Wallet Management modal (§13) -->
+  <div id="modal-wallets"
+       class="modal-backdrop hidden"
+       role="dialog" aria-modal="true" aria-labelledby="modal-wallets-title">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-modal-wallets-close" aria-label="Close">✕</button>
+      <p class="modal-title" id="modal-wallets-title">Wallets</p>
+      <!-- Populated by renderWalletList() -->
+      <div id="wallet-list-items"></div>
+      <div style="margin-top:14px;">
+        <button class="btn-primary" id="btn-new-wallet">+ Add New Wallet</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Export Picker modal (§14) -->
+  <div id="modal-export"
+       class="modal-backdrop hidden"
+       role="dialog" aria-modal="true" aria-labelledby="modal-export-title">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-modal-export-close" aria-label="Close">✕</button>
+      <p class="modal-title" id="modal-export-title">Export CSV</p>
+      <p style="color:var(--muted); font-size:0.875rem; line-height:1.5;
+                margin-top:-10px; margin-bottom:14px;">
+        Select wallets to export. Each downloads as a separate .csv file.
+      </p>
+
+      <div style="display:flex; justify-content:flex-end; margin-bottom:6px;">
+        <button class="btn-ghost" id="btn-export-toggle-all"
+                style="font-size:0.8rem; min-height:36px; text-decoration:none;">
+          Select all
+        </button>
+      </div>
+
+      <!-- Populated by renderExportList() -->
+      <div id="export-wallet-list"></div>
+
+      <div style="margin-top:16px;">
+        <button class="btn-primary" id="btn-export-selected" disabled>Export</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings modal (⚙ button in header) -->
+  <div id="modal-settings"
+       class="modal-backdrop hidden"
+       role="dialog" aria-modal="true" aria-labelledby="modal-settings-title">
+    <div class="modal-card">
+      <button class="modal-close" id="btn-modal-settings-close" aria-label="Close">✕</button>
+      <p class="modal-title" id="modal-settings-title">Settings</p>
+      <div class="settings-list">
+
+        <button class="settings-item" id="settings-wallets-item">
+          <span class="settings-item-icon">👛</span>
+          <span class="settings-item-label">Wallets</span>
+          <span class="settings-item-caret">›</span>
+        </button>
+
+        <button class="settings-item" id="settings-categories-item">
+          <span class="settings-item-icon">🏷️</span>
+          <span class="settings-item-label">Custom Categories</span>
+          <span class="settings-item-caret" id="settings-cat-caret">›</span>
+        </button>
+
+        <!-- Inline categories panel — toggled by settings-categories-item -->
+        <div id="settings-cat-panel" class="settings-cat-panel hidden">
+          <div class="settings-cat-list" id="settings-cat-list">
+            <!-- populated by renderCategorySettings() -->
+          </div>
+          <div class="settings-add-cat-row">
+            <input type="text" id="settings-cat-input"
+                   placeholder="New category name…" maxlength="30"
+                   autocomplete="off" autocorrect="off" spellcheck="false">
+            <button class="btn-add-cat" id="btn-add-cat">Add</button>
+          </div>
+        </div>
+
+        <button class="settings-item" id="settings-recurring-item">
+          <span class="settings-item-icon">🔁</span>
+          <span class="settings-item-label">Recurring</span>
+          <span class="settings-item-caret" id="settings-rec-caret">›</span>
+        </button>
+
+        <!-- Inline recurring panel — toggled by settings-recurring-item -->
+        <div id="settings-rec-panel" class="settings-cat-panel hidden">
+          <div id="settings-rec-list">
+            <!-- populated by renderRecurringSettings() -->
+          </div>
+          <div class="settings-rec-add">
+            <input type="text" id="rec-desc" placeholder="Description e.g. Rent, Netflix…"
+                   maxlength="50" autocomplete="off" autocorrect="off">
+            <div class="rec-add-row">
+              <input type="number" id="rec-amount" placeholder="Amount"
+                     min="0.01" step="0.01">
+              <select id="rec-type">
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+              </select>
+              <select id="rec-frequency">
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+                <option value="daily">Daily</option>
+              </select>
+            </div>
+            <select id="rec-category">
+              <!-- populated by buildCategoryOptions() when panel opens -->
+            </select>
+            <div class="rec-add-date-row">
+              <label for="rec-start">First due</label>
+              <input type="date" id="rec-start">
+            </div>
+            <button class="btn-add-cat" id="btn-add-rec"
+                    style="width:100%;margin-top:2px;">Add Recurring</button>
+          </div>
+        </div>
+
+        <button class="settings-item" id="settings-export-item">
+          <span class="settings-item-icon">📊</span>
+          <span class="settings-item-label">Export CSV</span>
+          <span class="settings-item-caret">›</span>
+        </button>
+
+        <button class="settings-item" id="settings-backup-item">
+          <span class="settings-item-icon">💾</span>
+          <span class="settings-item-label">Backup Data</span>
+          <span class="settings-item-caret">↓</span>
+        </button>
+
+        <button class="settings-item" id="settings-restore-item">
+          <span class="settings-item-icon">📥</span>
+          <span class="settings-item-label">Restore from Backup</span>
+          <span class="settings-item-caret">↑</span>
+        </button>
+
+        <button class="settings-item" id="settings-theme-item">
+          <span class="settings-item-icon">🎨</span>
+          <span class="settings-item-label">Theme</span>
+          <span class="settings-item-value" id="settings-theme-value">Dark</span>
+        </button>
+
+        <button class="settings-item danger" id="settings-reset-item">
+          <span class="settings-item-icon">⚠️</span>
+          <span class="settings-item-label">Reset All Data</span>
+          <span class="settings-item-caret">›</span>
+        </button>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ── TOAST CONTAINER ── -->
+  <div id="toast-container" role="status" aria-live="polite" aria-atomic="true"></div>
+
+
+  <!-- ╔═══════════════════════════════════════════════════════════╗
+       ║  JAVASCRIPT                                             ║
+       ╚═══════════════════════════════════════════════════════════╝ -->
+  <script>
+  'use strict';
+
+  /* ══════════════════════════════════════════════════════════════
+     §1  PWA BOOTSTRAP
+     Manifest and service worker are injected via Blob URLs so
+     the entire app stays a single self-contained .html file.
+  ══════════════════════════════════════════════════════════════ */
+
+  // ── §1-A  App icon (inline SVG — no external file) ──────────
+  const APP_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="100" fill="#0f0f1a"/>
+    <rect x="72" y="152" width="368" height="252" rx="28"
+          fill="#1a1a2e" stroke="#2a2a4a" stroke-width="10"/>
+    <rect x="72" y="196" width="368" height="44" fill="#2a2a4a"/>
+    <text x="256" y="330" text-anchor="middle"
+          font-family="system-ui,sans-serif"
+          font-size="148" font-weight="800" fill="#00d4aa">$</text>
+  </svg>`;
+
+  // ── §1-B  Web App Manifest via Blob ─────────────────────────
+  // Hash the static HTML *before* injectManifest() appends a random blob: URL
+  // to <head>. Computing the hash after that mutation produces a different value
+  // every page load, which forces a fresh SW install on every visit and defeats
+  // offline caching entirely.
+  const CACHE_VER = (function computeCacheVer () {
+    let h = 0x811c9dc5;
+    const s = document.documentElement.outerHTML;
+    for (let i = 0; i < s.length; i++) {
+      h = Math.imul(h ^ s.charCodeAt(i), 0x01000193) >>> 0;
+    }
+    return 'mt-' + h.toString(36);
+  })();
+
+  (function injectManifest () {
+    const manifest = {
+      name:             'Money Tracker',
+      short_name:       'Money Tracker',
+      description:      'Personal spending and earning tracker',
+      start_url:        '/',
+      display:          'standalone',
+      background_color: '#0f0f1a',
+      theme_color:      '#0f0f1a',
+      orientation:      'portrait-primary',
+      icons: [{
+        src:     'data:image/svg+xml,' + encodeURIComponent(APP_ICON),
+        sizes:   'any',
+        type:    'image/svg+xml',
+        purpose: 'any maskable'
+      }]
+    };
+
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const link = document.createElement('link');
+    link.rel   = 'manifest';
+    link.href  = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  })();
+
+  // ── §1-C  Service Worker (static sw.js) ──────────────────────────
+  // CACHE_VER was computed above, before injectManifest() ran.
+  (function registerSW () {
+    if (!('serviceWorker' in navigator)) return;
+    navigator.serviceWorker
+      .register('./sw.js?ver=' + encodeURIComponent(CACHE_VER), { scope: './' })
+      .then(reg => console.log('[MT] SW registered — scope:', reg.scope))
+      .catch(() => { /* SW unavailable — offline caching disabled */ });
+  })();
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §2  TOAST  UTILITY
+     showToast(message, isError = false)
+     Non-blocking 2-second notification, bottom-centre.
+  ══════════════════════════════════════════════════════════════ */
+  function showToast (message, isError = false) {
+    const wrap = document.getElementById('toast-container');
+    const el   = document.createElement('div');
+    el.className = 'toast' + (isError ? ' toast-error' : '');
+    el.textContent = message;
+    wrap.appendChild(el);
+    // Total animation: 0.25 s in + 1.7 s hold + 0.3 s out = 2.25 s
+    setTimeout(() => el.remove(), 2300);
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §3  MODAL HELPERS
+     Simple open / close wiring. Each phase registers its own
+     open logic; we centralise close behaviour here.
+  ══════════════════════════════════════════════════════════════ */
+
+  // Focus trap: keep Tab / Shift+Tab inside an open modal
+  const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
+
+  function _trapFocusHandler (ev) {
+    if (ev.key !== 'Tab') return;
+    const modal   = ev.currentTarget;
+    const nodes   = [...modal.querySelectorAll(FOCUSABLE)].filter(n => !n.closest('.hidden'));
+    if (!nodes.length) return;
+    const first = nodes[0];
+    const last  = nodes[nodes.length - 1];
+    if (ev.shiftKey) {
+      if (document.activeElement === first) { ev.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last)  { ev.preventDefault(); first.focus(); }
+    }
+  }
+
+  function openModal (id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('hidden');
+    el.addEventListener('keydown', _trapFocusHandler);
+  }
+
+  function closeModal (id) {
+    const el = document.getElementById(id);
+    if (!el || el.classList.contains('hidden')) return;
+    el.classList.add('is-closing');
+    el.removeEventListener('keydown', _trapFocusHandler);
+    setTimeout(() => {
+      el.classList.add('hidden');
+      el.classList.remove('is-closing');
+    }, 180);
+  }
+
+  // Global Escape key → close the topmost visible modal
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    // Find all currently visible modals and close the last one opened
+    const modals = ['modal-edit', 'modal-balance', 'modal-wallets', 'modal-export', 'modal-settings'];
+    for (let i = modals.length - 1; i >= 0; i--) {
+      const el = document.getElementById(modals[i]);
+      if (el && !el.classList.contains('hidden') && !el.classList.contains('is-closing')) {
+        // Balance modal in first-launch mode must not be escapable (no ✕)
+        if (modals[i] === 'modal-balance') {
+          const closeBtn = document.getElementById('btn-modal-balance-close');
+          if (closeBtn && closeBtn.classList.contains('hidden')) return;
+        }
+        closeModal(modals[i]);
+        return;
+      }
+    }
+  });
+
+  // Close edit modal via ✕ button or backdrop click
+  document.getElementById('btn-modal-edit-close')
+    .addEventListener('click', () => closeModal('modal-edit'));
+
+  document.getElementById('modal-edit')
+    .addEventListener('click', ev => {
+      if (ev.target === ev.currentTarget) closeModal('modal-edit');
+    });
+
+  // Balance modal: backdrop click only dismisses when in edit mode (✕ is visible)
+  document.getElementById('modal-balance')
+    .addEventListener('click', ev => {
+      if (ev.target !== ev.currentTarget) return;
+      const closeBtn = document.getElementById('btn-modal-balance-close');
+      if (closeBtn && !closeBtn.classList.contains('hidden')) {
+        closeModal('modal-balance');
+      }
+    });
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §4  DATA LAYER
+     ─────────────────────────────────────────────────────────────
+     All localStorage access is wrapped in try/catch.
+     Reads always JSON.parse; writes always JSON.stringify.
+     Mutations always replace the full array — never in-place.
+  ══════════════════════════════════════════════════════════════ */
+
+  const KEY_TXN = 'mt_transactions';
+
+  // ── §4-A  Read helpers ────────────────────────────────────────
+
+  function loadTransactions () {
+    try {
+      const raw = localStorage.getItem(KEY_TXN);
+      if (raw === null) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      console.warn('[MT] loadTransactions:', e);
+      return [];
+    }
+  }
+
+  // ── §4-B  Write helpers ───────────────────────────────────────
+
+  function saveTransactions (txns) {
+    try {
+      localStorage.setItem(KEY_TXN, JSON.stringify(txns));
+      return true;
+    } catch (e) {
+      console.warn('[MT] saveTransactions:', e);
+      showToast('⚠ Could not save — storage may be full.', true);
+      return false;
+    }
+  }
+
+  // ── §4-C  CRUD (never mutate the stored array in place) ───────
+
+  function addTransaction (tx) {
+    const all = loadTransactions();
+    return saveTransactions([tx, ...all]);   // newest first
+  }
+
+  function updateTransaction (id, changes) {
+    const all = loadTransactions().map(t =>
+      t.id === id ? { ...t, ...changes } : t
+    );
+    return saveTransactions(all);
+  }
+
+  function deleteTransaction (id) {
+    const all = loadTransactions().filter(t => t.id !== id);
+    return saveTransactions(all);
+  }
+
+  // ── §4-D  Computed values ─────────────────────────────────────
+
+  function computeRunningBalance (txns = null) {
+    const wallet = getActiveWallet();
+    return wallet ? computeWalletBalance(wallet.id, txns) : 0;
+  }
+
+  function getPeriodStats (period, txns = null) {
+    const wallet = getActiveWallet();
+    if (!wallet) return { income: 0, expense: 0, net: 0 };
+
+    const all          = txns !== null ? txns : loadTransactions();
+    const filteredBase = all.filter(t => t.walletId === wallet.id);
+    let filtered;
+
+    if (period === 'week') {
+      const today = new Date();
+      const dow   = today.getDay();
+      const toMon = dow === 0 ? -6 : 1 - dow;
+      const mon   = new Date(today);
+      mon.setDate(today.getDate() + toMon);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      // Use local date parts (not toISOString which converts to UTC first and
+      // produces the wrong calendar date for users in UTC+ or UTC− timezones).
+      const localStr = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      const monStr = localStr(mon);
+      const sunStr = localStr(sun);
+      filtered = filteredBase.filter(t => t.date >= monStr && t.date <= sunStr);
+
+    } else if (period === 'month') {
+      const now   = new Date();
+      const y     = now.getFullYear();
+      const m     = String(now.getMonth() + 1).padStart(2, '0');
+      const start = `${y}-${m}-01`;
+      const last  = new Date(y, now.getMonth() + 1, 0).getDate();
+      const end   = `${y}-${m}-${String(last).padStart(2, '0')}`;
+      filtered = filteredBase.filter(t => t.date >= start && t.date <= end);
+
+    } else {
+      filtered = filteredBase;
+    }
+
+    const income  = filtered.filter(t => t.type === 'income' ).reduce((s, t) => s + t.amount, 0);
+    const expense = filtered.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+    return { income, expense, net: income - expense };
+  }
+
+  // ── §4-E  Utility helpers ─────────────────────────────────────
+
+  /** Collision-resistant ID: timestamp base-36 + random suffix */
+  function makeId () {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  /** Always two decimal places */
+  // fmt() is for display only — never use in CSV or data storage
+  function fmt (n) {
+    return Number(n).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  }
+
+  /** Today as YYYY-MM-DD in local time */
+  function todayStr () {
+    const d  = new Date();
+    const y  = d.getFullYear();
+    const m  = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${da}`;
+  }
+
+  /**
+   * Format YYYY-MM-DD date string as a human-readable section header.
+   * Returns "Today", "Yesterday", or a locale short date like "May 5".
+   */
+  function formatDateLabel (dateStr) {
+    const today     = todayStr();
+    if (dateStr === today) return 'Today';
+    // Build yesterday's string purely arithmetically (avoids UTC edge cases)
+    const [y, mo, da] = today.split('-').map(Number);
+    const yd = new Date(y, mo - 1, da - 1);
+    const yStr = `${yd.getFullYear()}-${String(yd.getMonth() + 1).padStart(2, '0')}-${String(yd.getDate()).padStart(2, '0')}`;
+    if (dateStr === yStr) return 'Yesterday';
+    // Append T00:00:00 to force local-time parsing (avoids one-day-off on UTC± zones)
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric'
+    });
+  }
+
+  /**
+   * Short date for within a transaction row: "May 5"
+   */
+  function formatDateShort (dateStr) {
+    return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+      month: 'short', day: 'numeric'
+    });
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §4-F  WALLET DATA LAYER
+     Wallet shape: { id: string, name: string, startingBalance: number }
+  ══════════════════════════════════════════════════════════════ */
+
+  const KEY_WALLETS       = 'mt_wallets';
+  const KEY_ACTIVE_WALLET = 'mt_active_wallet';
+
+  function loadWallets () {
+    try {
+      const raw = localStorage.getItem(KEY_WALLETS);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+
+  function saveWallets (wallets) {
+    try {
+      localStorage.setItem(KEY_WALLETS, JSON.stringify(wallets));
+      return true;
+    } catch (e) {
+      showToast('⚠ Could not save wallets.', true);
+      return false;
+    }
+  }
+
+  // ── Module-level mutable state (all in one place) ────────────
+  let _activeWalletId  = null;   // ID of the currently active wallet
+  let _editingId       = null;   // ID of the transaction open in the edit modal
+  let _statPeriod      = 'week'; // Active stats period: 'week' | 'month' | 'all'
+  let _lastBalance     = null;   // Previous balance value — drives the pop animation
+  let _searchQuery     = '';     // Current text search
+  let _filterType      = 'all'; // 'all' | 'income' | 'expense'
+  let _filterCategory  = '';    // '' = all categories
+  let _filterOpen      = false; // Whether the filter panel is expanded
+  let _historyLimit    = 50;   // Max transactions rendered; grows via Load More
+
+  function getActiveWallet () {
+    const wallets = loadWallets();
+    return wallets.find(w => w.id === _activeWalletId) || wallets[0] || null;
+  }
+
+  function setActiveWallet (id) {
+    _activeWalletId = id;
+    try { localStorage.setItem(KEY_ACTIVE_WALLET, id); } catch (e) {}
+  }
+
+  // ── Wallet CRUD ───────────────────────────────────────────────
+  function createWallet (name, startingBalance) {
+    const wallet = { id: makeId(), name: name.trim() || 'My Wallet', startingBalance };
+    return saveWallets([...loadWallets(), wallet]) ? wallet : null;
+  }
+
+  function updateWallet (id, changes) {
+    return saveWallets(loadWallets().map(w => w.id === id ? { ...w, ...changes } : w));
+  }
+
+  function deleteWallet (id) {
+    const wallets = loadWallets();
+    if (wallets.length <= 1) {
+      showToast('⚠ You need at least one wallet.', true);
+      return false;
+    }
+    if (!saveWallets(wallets.filter(w => w.id !== id))) return false;
+    // Remove all transactions belonging to this wallet
+    saveTransactions(loadTransactions().filter(t => t.walletId !== id));
+    // Switch away if the deleted wallet was active
+    if (_activeWalletId === id) {
+      const remaining = loadWallets();
+      if (remaining.length) setActiveWallet(remaining[0].id);
+    }
+    return true;
+  }
+
+  // ── Per-wallet running balance ────────────────────────────────
+  function computeWalletBalance (walletId, txns = null, wallets = null) {
+    const allWallets = wallets !== null ? wallets : loadWallets();
+    const wallet = allWallets.find(w => w.id === walletId);
+    if (!wallet) return 0;
+    const all = txns !== null ? txns : loadTransactions();
+    return (wallet.startingBalance || 0) + all
+      .filter(t => t.walletId === walletId)
+      .reduce((s, t) => t.type === 'income' ? s + t.amount : s - t.amount, 0);
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §5  WALLET FORM MODAL  (create / edit / first-launch)
+  ══════════════════════════════════════════════════════════════ */
+
+  // 'first-launch' | 'create' | 'edit'
+  let _walletFormMode   = 'first-launch';
+  let _walletFormEditId = null;
+
+  /**
+   * Open the wallet form modal.
+   * isFirstLaunch=true  → mandatory first-wallet setup, no ✕
+   * isFirstLaunch=false → edit active wallet name + balance
+   */
+  function openBalanceModal (isFirstLaunch) {
+    _walletFormMode   = isFirstLaunch ? 'first-launch' : 'edit';
+    _walletFormEditId = isFirstLaunch ? null : _activeWalletId;
+    _showWalletForm();
+  }
+
+  /** Open form to create an additional wallet */
+  function openCreateWalletModal () {
+    _walletFormMode   = 'create';
+    _walletFormEditId = null;
+    _showWalletForm();
+  }
+
+  /** Open form to edit a specific wallet by ID */
+  function openEditWalletModal (id) {
+    _walletFormMode   = 'edit';
+    _walletFormEditId = id;
+    _showWalletForm();
+  }
+
+  function _showWalletForm () {
+    const closeBtn  = document.getElementById('btn-modal-balance-close');
+    const title     = document.getElementById('modal-balance-title');
+    const subtitle  = document.getElementById('modal-balance-subtitle');
+    const nameInput = document.getElementById('input-wallet-name');
+    const balInput  = document.getElementById('input-starting-balance');
+    const errSpan   = document.getElementById('balance-modal-error');
+    const setBtn    = document.getElementById('btn-set-balance');
+
+    if (_walletFormMode === 'first-launch') {
+      closeBtn.classList.add('hidden');
+      title.textContent    = '💰 Welcome to Money Tracker';
+      subtitle.textContent = 'Name your first wallet and enter its current balance to get started.';
+      setBtn.textContent   = 'Create Wallet & Get Started';
+      nameInput.value      = '';
+      balInput.value       = '';
+    } else if (_walletFormMode === 'create') {
+      closeBtn.classList.remove('hidden');
+      title.textContent    = '+ New Wallet';
+      subtitle.textContent = 'Give your wallet a name and set its starting balance.';
+      setBtn.textContent   = 'Create Wallet';
+      nameInput.value      = '';
+      balInput.value       = '';
+    } else {
+      // edit
+      const w = loadWallets().find(w => w.id === _walletFormEditId) || getActiveWallet();
+      closeBtn.classList.remove('hidden');
+      title.textContent    = '✏ Edit Wallet';
+      subtitle.textContent = 'Update the name or starting balance. Changing the balance adjusts your running total.';
+      setBtn.textContent   = 'Save Changes';
+      nameInput.value      = w ? w.name : '';
+      balInput.value       = w && typeof w.startingBalance === 'number' ? w.startingBalance.toFixed(2) : '';
+    }
+
+    errSpan.textContent = '';
+    errSpan.classList.add('hidden');
+    openModal('modal-balance');
+    requestAnimationFrame(() => nameInput.focus());
+  }
+
+  // ✕ button (hidden on first-launch)
+  document.getElementById('btn-modal-balance-close')
+    .addEventListener('click', () => closeModal('modal-balance'));
+
+  // Enter on wallet name → jump to balance field
+  document.getElementById('input-wallet-name')
+    .addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        document.getElementById('input-starting-balance').focus();
+      }
+    });
+
+  // Enter on balance field → submit
+  document.getElementById('input-starting-balance')
+    .addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        document.getElementById('btn-set-balance').click();
+      }
+    });
+
+  // Save handler
+  document.getElementById('btn-set-balance')
+    .addEventListener('click', () => {
+      const nameInput = document.getElementById('input-wallet-name');
+      const balInput  = document.getElementById('input-starting-balance');
+      const errSpan   = document.getElementById('balance-modal-error');
+      const name      = nameInput.value.trim();
+      const raw       = balInput.value.trim();
+      const val       = parseFloat(raw);
+
+      if (!name) {
+        errSpan.textContent = 'Please enter a wallet name.';
+        errSpan.classList.remove('hidden');
+        nameInput.focus();
+        return;
+      }
+      if (raw === '' || isNaN(val) || val < 0) {
+        errSpan.textContent = 'Please enter a valid balance (0 or more).';
+        errSpan.classList.remove('hidden');
+        balInput.focus();
+        return;
+      }
+
+      const rounded = Math.round(val * 100) / 100;
+
+      if (_walletFormMode === 'edit') {
+        updateWallet(_walletFormEditId, { name, startingBalance: rounded });
+        closeModal('modal-balance');
+        showToast('✓ Wallet updated');
+        renderApp();
+      } else {
+        // 'first-launch' or 'create'
+        const wallet = createWallet(name, rounded);
+        if (!wallet) return;
+        setActiveWallet(wallet.id);
+        closeModal('modal-balance');
+        showToast(_walletFormMode === 'first-launch'
+          ? `✓ Wallet "${name}" created — let's go! 🎉`
+          : `✓ Wallet "${name}" added`);
+        renderApp();
+      }
+    });
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §6  APP BOOTSTRAP  &  RENDER ENTRY-POINT
+  ══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Global render entry-point — called after every state change.
+   */
+  function renderApp () {
+    _historyLimit = 50;                    // reset pagination on every full re-render
+    const txns = loadTransactions();       // single load for the entire render cycle
+    renderDashboard(txns);
+    renderChart(txns);
+    renderHistory(txns);
+    initSwipeGestures();                   // re-bind swipe after history DOM is rebuilt
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     §6-A  SWIPE-TO-ACTION
+     Horizontal swipe on a .tx-swipe-wrap:
+       → right  (≥80 px)  opens the edit modal
+       → left   (≥80 px)  triggers inline delete confirm
+  ══════════════════════════════════════════════════════════════ */
+  function initSwipeGestures () {
+    const THRESHOLD = 80;
+
+    document.querySelectorAll('.tx-swipe-wrap').forEach(wrap => {
+      const item = wrap.querySelector('.tx-swipe-item');
+      if (!item || item._swipeInit) return;
+      item._swipeInit = true;  // prevent double-binding across re-renders
+
+      let startX = 0, startY = 0, curX = 0;
+      let dragging = false, dirLocked = false, isHoriz = false;
+
+      item.addEventListener('touchstart', ev => {
+        if (ev.touches.length > 1) return;
+        startX   = ev.touches[0].clientX;
+        startY   = ev.touches[0].clientY;
+        dragging = true;
+        dirLocked = false;
+        isHoriz   = false;
+        item.classList.remove('snap-back');
+      }, { passive: true });
+
+      item.addEventListener('touchmove', ev => {
+        if (!dragging || ev.touches.length > 1) return;
+        const dx = ev.touches[0].clientX - startX;
+        const dy = ev.touches[0].clientY - startY;
+
+        if (!dirLocked) {
+          if (Math.abs(dx) < 6 && Math.abs(dy) < 6) return;
+          isHoriz   = Math.abs(dx) > Math.abs(dy);
+          dirLocked = true;
+        }
+        if (!isHoriz) return;
+
+        ev.preventDefault();
+        curX = Math.max(-THRESHOLD * 1.4, Math.min(THRESHOLD * 1.4, dx));
+        item.style.transform = `translateX(${curX}px)`;
+      }, { passive: false });
+
+      item.addEventListener('touchend', () => {
+        if (!dragging) return;
+        dragging  = false;
+        dirLocked = false;
+        item.classList.add('snap-back');
+
+        const txId = wrap.dataset.swipeId;
+        if (curX >= THRESHOLD) {
+          item.style.transform = '';
+          openEditModal(txId);
+        } else if (curX <= -THRESHOLD) {
+          item.style.transform = '';
+          handleDeleteTx(txId);
+        } else {
+          item.style.transform = '';
+        }
+        curX = 0;
+      }, { passive: true });
+    });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     §6-B  PULL-TO-REFRESH
+     Detects a downward pull when #main is scrolled to the top.
+     At 72 px the arrow flips; releasing triggers renderApp().
+  ══════════════════════════════════════════════════════════════ */
+  function initPullToRefresh () {
+    const main      = document.getElementById('main');
+    const indicator = document.getElementById('ptr-indicator');
+    const THRESHOLD = 72;
+    let startY = 0, pull = 0, active = false;
+
+    main.addEventListener('touchstart', ev => {
+      if (main.scrollTop === 0 && ev.touches.length === 1) {
+        startY = ev.touches[0].clientY;
+        active = true;
+      }
+    }, { passive: true });
+
+    main.addEventListener('touchmove', ev => {
+      if (!active) return;
+      const dy = ev.touches[0].clientY - startY;
+      if (dy <= 0) { active = false; return; }
+      pull = Math.min(dy * 0.5, THRESHOLD + 16);
+      indicator.style.height = pull + 'px';
+      indicator.classList.toggle('ptr-ready', pull >= THRESHOLD);
+    }, { passive: true });
+
+    main.addEventListener('touchend', () => {
+      if (!active) return;
+      const triggered = pull >= THRESHOLD;
+      active = false;
+      pull   = 0;
+      indicator.style.height = '0';
+      indicator.classList.remove('ptr-ready');
+      if (triggered) {
+        renderApp();
+        showToast('✓ Refreshed');
+      }
+    }, { passive: true });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     §6-C  SETTINGS MODAL
+  ══════════════════════════════════════════════════════════════ */
+  function handleBackup () {
+    const backup = {
+      version:            1,
+      exported:           new Date().toISOString(),
+      wallets:            loadWallets(),
+      transactions:       loadTransactions(),
+      customCategories:   loadCustomCategories(),
+      recurringTemplates: loadRecurring(),
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const a    = Object.assign(document.createElement('a'), {
+      href:     url,
+      download: 'money-tracker-backup-' + todayStr() + '.json'
+    });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('✓ Backup downloaded');
+  }
+
+  // ── §6-D  Restore from backup ──────────────────────────────────────────
+  function handleRestoreSelect () {
+    // Toggle: if confirm box already open, close it; otherwise open file picker
+    const existing = document.getElementById('settings-restore-confirm');
+    if (existing) { existing.remove(); return; }
+    document.getElementById('restore-file-input').click();
+  }
+
+  function handleRestoreFile (file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      let backup;
+      try { backup = JSON.parse(ev.target.result); }
+      catch (e) { showToast('⚠ Invalid file — not valid JSON.', true); return; }
+
+      if (!Array.isArray(backup.wallets) || !Array.isArray(backup.transactions)) {
+        showToast('⚠ File does not look like a Money Tracker backup.', true);
+        return;
+      }
+
+      const wCount   = backup.wallets.length;
+      const tCount   = backup.transactions.length;
+      const catCount = (backup.customCategories   || []).length;
+      const recCount = (backup.recurringTemplates || []).length;
+
+      // Build a human-readable summary of the backup contents
+      const extras = [
+        catCount ? catCount + ' custom categor' + (catCount !== 1 ? 'ies' : 'y') : '',
+        recCount ? recCount + ' recurring template' + (recCount !== 1 ? 's' : '') : '',
+      ].filter(Boolean).join(', ');
+
+      let dateLine = '';
+      if (backup.exported) {
+        try {
+          dateLine = ' from <strong>' +
+            new Date(backup.exported).toLocaleDateString(undefined,
+              { day: 'numeric', month: 'short', year: 'numeric' }) +
+            '</strong>';
+        } catch (e) { /* ignore bad date */ }
+      }
+
+      const box = document.createElement('div');
+      box.id = 'settings-restore-confirm';
+      box.className = 'settings-confirm';
+      box.innerHTML = `
+        <p>Backup${dateLine}: <strong>${wCount} wallet${wCount !== 1 ? 's' : ''}</strong>,
+           <strong>${tCount} transaction${tCount !== 1 ? 's' : ''}</strong>${extras ? ', ' + extras : ''}.
+           <br>This will <strong>replace all current data</strong>. This cannot be undone.</p>
+        <div class="settings-confirm-btns">
+          <button class="btn-confirm-cancel" id="btn-restore-cancel">Cancel</button>
+          <button class="btn-confirm-restore" id="btn-restore-ok">Restore</button>
+        </div>`;
+
+      document.getElementById('settings-restore-item').after(box);
+
+      document.getElementById('btn-restore-cancel').onclick = () => box.remove();
+      document.getElementById('btn-restore-ok').onclick = () => {
+        try {
+          localStorage.setItem(KEY_WALLETS,       JSON.stringify(backup.wallets));
+          localStorage.setItem(KEY_TXN,           JSON.stringify(backup.transactions));
+          localStorage.setItem(KEY_CATEGORIES,    JSON.stringify(backup.customCategories   || []));
+          localStorage.setItem(KEY_RECURRING,     JSON.stringify(backup.recurringTemplates || []));
+          // Point to the first restored wallet; current active ID may not exist in the backup
+          if (backup.wallets.length > 0) {
+            localStorage.setItem(KEY_ACTIVE_WALLET, backup.wallets[0].id);
+          } else {
+            localStorage.removeItem(KEY_ACTIVE_WALLET);
+          }
+          // KEY_THEME intentionally not overwritten — keep the user's current preference
+        } catch (e) {
+          showToast('⚠ Could not write to storage — check available space.', true);
+          box.remove();
+          return;
+        }
+        box.remove();
+        showToast('✓ Backup restored — reloading…');
+        setTimeout(() => location.reload(), 700);
+      };
+    };
+    reader.onerror = () => showToast('⚠ Could not read the file.', true);
+    reader.readAsText(file);
+  }
+
+  function handleResetRequest () {
+    // Remove any existing confirm box first (toggle behaviour)
+    const existing = document.getElementById('settings-reset-confirm');
+    if (existing) { existing.remove(); return; }
+
+    const box = document.createElement('div');
+    box.id        = 'settings-reset-confirm';
+    box.className = 'settings-confirm';
+    box.innerHTML = `
+      <p>This will permanently delete <strong>all wallets, transactions, recurring templates, and custom categories</strong>. This cannot be undone.</p>
+      <div class="settings-confirm-btns">
+        <button class="btn-confirm-cancel" id="btn-reset-cancel">Cancel</button>
+        <button class="btn-confirm-delete" id="btn-reset-ok">Delete everything</button>
+      </div>`;
+    document.getElementById('settings-reset-item').after(box);
+
+    document.getElementById('btn-reset-cancel').onclick = () => box.remove();
+    document.getElementById('btn-reset-ok').onclick = () => {
+      [KEY_TXN, KEY_WALLETS, KEY_ACTIVE_WALLET, KEY_THEME, KEY_CATEGORIES, KEY_RECURRING].forEach(k => {
+        try { localStorage.removeItem(k); } catch (e) { /* ignore */ }
+      });
+      closeModal('modal-settings');
+      showToast('All data cleared');
+      setTimeout(() => location.reload(), 600);
+    };
+    document.getElementById('btn-reset-ok').focus();
+  }
+
+  function initSettings () {
+    // Open settings modal from header gear button
+    document.getElementById('btn-settings')
+      .addEventListener('click', () => {
+        // Sync theme label before opening
+        const theme = localStorage.getItem(KEY_THEME) || 'dark';
+        const val   = document.getElementById('settings-theme-value');
+        if (val) val.textContent = themeLabel(theme);
+        openModal('modal-settings');
+        document.getElementById('btn-modal-settings-close').focus();
+      });
+
+    document.getElementById('btn-modal-settings-close')
+      .addEventListener('click', () => closeModal('modal-settings'));
+
+    document.getElementById('modal-settings')
+      .addEventListener('click', ev => {
+        if (ev.target === ev.currentTarget) closeModal('modal-settings');
+      });
+
+    // Wallets → open wallet manager modal (closes settings first for clarity)
+    document.getElementById('settings-wallets-item').addEventListener('click', () => {
+      closeModal('modal-settings');
+      setTimeout(() => openWalletsModal(), 200);
+    });
+
+    // Export CSV → open export picker
+    document.getElementById('settings-export-item').addEventListener('click', () => {
+      closeModal('modal-settings');
+      setTimeout(() => handleExportCsv(), 200);
+    });
+
+    // Backup → download JSON
+    document.getElementById('settings-backup-item')
+      .addEventListener('click', handleBackup);
+
+    // Restore → open file picker, validate, confirm, then reload
+    document.getElementById('settings-restore-item')
+      .addEventListener('click', handleRestoreSelect);
+    document.getElementById('restore-file-input')
+      .addEventListener('change', function () {
+        const file = this.files[0];
+        this.value = '';  // reset so the same file can be re-selected next time
+        handleRestoreFile(file);
+      });
+
+    // Theme → cycle dark → light → auto → dark
+    document.getElementById('settings-theme-item')
+      .addEventListener('click', cycleTheme);
+
+    // Reset data → show inline confirm
+    document.getElementById('settings-reset-item')
+      .addEventListener('click', handleResetRequest);
+
+    // ── Custom Categories ────────────────────────────────────
+    const catPanelBtn = document.getElementById('settings-categories-item');
+    const catPanel    = document.getElementById('settings-cat-panel');
+    const catCaret    = document.getElementById('settings-cat-caret');
+    const catInput    = document.getElementById('settings-cat-input');
+    const catList     = document.getElementById('settings-cat-list');
+    const btnAddCat   = document.getElementById('btn-add-cat');
+
+    // Toggle the inline panel open/closed
+    catPanelBtn.addEventListener('click', () => {
+      const isOpen = !catPanel.classList.contains('hidden');
+      catPanel.classList.toggle('hidden', isOpen);
+      catCaret.textContent = isOpen ? '›' : '⌄';
+      if (!isOpen) {
+        renderCategorySettings();
+        requestAnimationFrame(() => catInput.focus());
+      }
+    });
+
+    // Delete a custom category (event-delegated to the list)
+    catList.addEventListener('click', e => {
+      const btn = e.target.closest('[data-catdelete]');
+      if (!btn) return;
+      const name = btn.dataset.catdelete;
+      saveCustomCategories(loadCustomCategories().filter(c => c !== name));
+      renderCategorySettings();
+      refreshCategorySelects();
+      showToast(`"${name}" removed`);
+    });
+
+    // Add a new custom category
+    function doAddCategory () {
+      const name = catInput.value.trim();
+      if (!name) return;
+      if (name.length > 30) {
+        showToast('Name must be 30 characters or fewer.', true); return;
+      }
+      if (getCategories().some(c => c.toLowerCase() === name.toLowerCase())) {
+        showToast(`"${name}" already exists.`, true); return;
+      }
+      saveCustomCategories([...loadCustomCategories(), name]);
+      catInput.value = '';
+      renderCategorySettings();
+      refreshCategorySelects();
+      showToast(`✓ "${name}" added`);
+    }
+
+    btnAddCat.addEventListener('click', doAddCategory);
+    catInput.addEventListener('keydown', e => { if (e.key === 'Enter') doAddCategory(); });
+
+    // ── Recurring Transactions ───────────────────────────────
+    const recPanelBtn  = document.getElementById('settings-recurring-item');
+    const recPanel     = document.getElementById('settings-rec-panel');
+    const recCaret     = document.getElementById('settings-rec-caret');
+    const recList      = document.getElementById('settings-rec-list');
+    const recDescEl    = document.getElementById('rec-desc');
+    const recAmountEl  = document.getElementById('rec-amount');
+    const recTypeEl    = document.getElementById('rec-type');
+    const recFreqEl    = document.getElementById('rec-frequency');
+    const recCatEl     = document.getElementById('rec-category');
+    const recStartEl   = document.getElementById('rec-start');
+    const btnAddRec    = document.getElementById('btn-add-rec');
+
+    // Toggle recurring panel
+    recPanelBtn.addEventListener('click', () => {
+      const isOpen = !recPanel.classList.contains('hidden');
+      recPanel.classList.toggle('hidden', isOpen);
+      recCaret.textContent = isOpen ? '›' : '⌄';
+      if (!isOpen) {
+        renderRecurringSettings();
+        buildCategoryOptions(recCatEl, { selected: 'Uncategorized' });
+        // Default start date = tomorrow
+        const tom = new Date();
+        tom.setDate(tom.getDate() + 1);
+        recStartEl.value = `${tom.getFullYear()}-${String(tom.getMonth()+1).padStart(2,'0')}-${String(tom.getDate()).padStart(2,'0')}`;
+        requestAnimationFrame(() => recDescEl.focus());
+      }
+    });
+
+    // Pause / resume a recurring (delegated)
+    recList.addEventListener('click', e => {
+      const pauseBtn = e.target.closest('[data-recpause]');
+      if (pauseBtn) {
+        const id        = pauseBtn.dataset.recpause;
+        const templates = loadRecurring();
+        const tmpl      = templates.find(t => t.id === id);
+        if (tmpl) {
+          tmpl.paused = !tmpl.paused;
+          saveRecurring(templates);
+          renderRecurringSettings();
+        }
+        return;
+      }
+      // Delete a recurring (delegated)
+      const delBtn = e.target.closest('[data-recdelete]');
+      if (delBtn) {
+        const id = delBtn.dataset.recdelete;
+        saveRecurring(loadRecurring().filter(t => t.id !== id));
+        renderRecurringSettings();
+        showToast('Recurring removed');
+      }
+    });
+
+    // Add a new recurring
+    function doAddRecurring () {
+      const desc   = recDescEl.value.trim();
+      const amount = parseFloat(recAmountEl.value);
+      const start  = recStartEl.value;
+
+      if (!desc)              { showToast('Please enter a description.', true); return; }
+      if (!amount || amount <= 0) { showToast('Please enter a valid amount.', true); return; }
+      if (!start)             { showToast('Please set a first-due date.', true); return; }
+
+      const wallet = getActiveWallet();
+      if (!wallet)            { showToast('⚠ No wallet selected.', true); return; }
+
+      const template = {
+        id:          makeId(),
+        walletId:    wallet.id,
+        description: desc,
+        amount:      Math.round(amount * 100) / 100,
+        type:        recTypeEl.value,
+        category:    recCatEl.value || 'Uncategorized',
+        frequency:   recFreqEl.value,
+        nextDue:     start,
+        paused:      false,
+      };
+      saveRecurring([...loadRecurring(), template]);
+
+      // Clear form
+      recDescEl.value   = '';
+      recAmountEl.value = '';
+
+      // If first due is today or earlier, add immediately
+      if (start <= todayStr()) {
+        processRecurring();
+        renderApp();
+      }
+
+      renderRecurringSettings();
+      showToast(`✓ "${desc}" recurring added`);
+      recDescEl.focus();
+    }
+
+    btnAddRec.addEventListener('click', doAddRecurring);
+    recDescEl.addEventListener('keydown', e => { if (e.key === 'Enter') doAddRecurring(); });
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     §8-C  FILTER BAR  —  initFilterBar()
+     Wires the stable #filter-panel DOM (never rebuilt). Filter state
+     lives in module vars; each change calls renderHistory() only —
+     not the full renderApp() — so stats & chart are unaffected.
+  ══════════════════════════════════════════════════════════════ */
+
+  function _updateFilterIndicator () {
+    const btn    = document.getElementById('btn-filter-toggle');
+    if (!btn) return;
+    const active = _searchQuery !== '' || _filterType !== 'all' || _filterCategory !== '';
+    btn.classList.toggle('has-filters', active);
+  }
+
+  function initFilterBar () {
+    const toggleBtn = document.getElementById('btn-filter-toggle');
+    const panel     = document.getElementById('filter-panel');
+    const input     = document.getElementById('filter-input');
+    const clearBtn  = document.getElementById('filter-clear');
+    const catSelect = document.getElementById('filter-category');
+
+    function applyAndRender () {
+      _historyLimit = 50;        // filter context changed — start pagination over
+      _updateFilterIndicator();
+      renderHistory();           // history only — chart & dashboard stay put
+    }
+
+    // ── Open / close panel ──────────────────────────────────
+    toggleBtn.addEventListener('click', () => {
+      _filterOpen = !_filterOpen;
+      panel.classList.toggle('hidden', !_filterOpen);
+      toggleBtn.classList.toggle('is-open', _filterOpen);
+      toggleBtn.setAttribute('aria-expanded', String(_filterOpen));
+      if (_filterOpen) requestAnimationFrame(() => input.focus());
+    });
+
+    // ── Text search ─────────────────────────────────────────
+    input.addEventListener('input', () => {
+      _searchQuery = input.value.trim();
+      clearBtn.classList.toggle('hidden', _searchQuery === '');
+      applyAndRender();
+    });
+
+    // Keyboard: Escape clears search; Enter dismisses keyboard on mobile
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        if (_searchQuery) {
+          input.value = '';
+          _searchQuery = '';
+          clearBtn.classList.add('hidden');
+          applyAndRender();
+        } else {
+          input.blur();
+        }
+        e.stopPropagation();
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      input.value  = '';
+      _searchQuery = '';
+      clearBtn.classList.add('hidden');
+      input.focus();
+      applyAndRender();
+    });
+
+    // ── Type chips ──────────────────────────────────────────
+    panel.querySelectorAll('[data-ftype]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _filterType = btn.dataset.ftype;
+        panel.querySelectorAll('[data-ftype]').forEach(b =>
+          b.classList.toggle('active', b.dataset.ftype === _filterType));
+        applyAndRender();
+      });
+    });
+
+    // ── Category select ─────────────────────────────────────
+    catSelect.addEventListener('change', () => {
+      _filterCategory = catSelect.value;
+      applyAndRender();
+    });
+  }
+
+
+  function bootstrap () {
+    // Apply saved theme immediately (before first paint)
+    applyTheme(localStorage.getItem(KEY_THEME) || 'dark');
+
+    // Wire up all static sections once at startup (elements already in DOM)
+    initInputSection();
+    initHistorySection();
+    initSettings();
+    initFilterBar();
+    initPullToRefresh();
+    refreshCategorySelects();   // populate all three category selects from storage
+
+    // Dashboard listeners — attached ONCE to the stable <header> via delegation.
+    // renderDashboard() rebuilds #dashboard-content on every state change, so
+    // attaching directly to its child nodes would leak a new listener each time.
+    document.querySelector('header').addEventListener('click', ev => {
+      if (ev.target.closest('#btn-open-wallets')) { openWalletsModal(); return; }
+      if (ev.target.closest('#btn-edit-balance'))  { openEditWalletModal(getActiveWallet()?.id); return; }
+      const pBtn = ev.target.closest('[data-period]');
+      if (pBtn) { _statPeriod = pBtn.dataset.period; renderApp(); }
+    });
+
+    // Migrate single-wallet data from older versions if needed
+    migrateToMultiWallet();
+
+    const wallets = loadWallets();
+    if (wallets.length === 0) {
+      // Brand-new user: prompt to create first wallet
+      openBalanceModal(true);
+    } else {
+      // Restore active wallet (migration may have already set _activeWalletId)
+      if (!_activeWalletId) {
+        try {
+          const saved = localStorage.getItem(KEY_ACTIVE_WALLET);
+          _activeWalletId = (saved && wallets.find(w => w.id === saved))
+            ? saved : wallets[0].id;
+        } catch (e) { _activeWalletId = wallets[0].id; }
+      }
+      processRecurring();   // add any overdue entries before first render
+      renderApp();
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', bootstrap);
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §7  SMART INPUT  —  Parser & Category Detector
+  ══════════════════════════════════════════════════════════════ */
+
+  // ── Category icon map — emoji shown in pills and selects ─────
+  const CATEGORY_ICONS = {
+    'Food & Drinks':    '🍔',
+    'Transportation':   '⛽',
+    'Shopping':         '🛒',
+    'Bills & Utilities':'🏠',
+    'Health':           '💊',
+    'Entertainment':    '🎬',
+    'Uncategorized':    '📋',
+  };
+
+  // ── Category colour map — donut chart slices ─────────────────
+  const CATEGORY_COLORS = {
+    'Food & Drinks':    '#f59e0b',
+    'Transportation':   '#3b82f6',
+    'Shopping':         '#8b5cf6',
+    'Bills & Utilities':'#ef4444',
+    'Health':           '#22c55e',
+    'Entertainment':    '#ec4899',
+    'Uncategorized':    '#64748b',
+  };
+
+  // ── Default category list (in display order) ─────────────────
+  const DEFAULT_CATEGORIES = [
+    'Food & Drinks', 'Transportation', 'Shopping',
+    'Bills & Utilities', 'Health', 'Entertainment', 'Uncategorized',
+  ];
+
+  // ── Colour palette for user-defined categories ────────────────
+  // Picked to be distinct from the 7 defaults above.
+  const CUSTOM_CAT_PALETTE = [
+    '#06b6d4', // cyan
+    '#f97316', // orange
+    '#84cc16', // lime
+    '#a855f7', // violet
+    '#14b8a6', // teal
+    '#f43f5e', // rose
+    '#eab308', // amber-yellow
+  ];
+
+  /* ──────────────────────────────────────────────────────────────
+     Category storage helpers
+  ────────────────────────────────────────────────────────────── */
+  const KEY_CATEGORIES = 'mt_categories';
+
+  function loadCustomCategories () {
+    try {
+      const raw = localStorage.getItem(KEY_CATEGORIES);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? parsed.filter(c => typeof c === 'string' && c.trim())
+        : [];
+    } catch (e) { return []; }
+  }
+
+  function saveCustomCategories (cats) {
+    try { localStorage.setItem(KEY_CATEGORIES, JSON.stringify(cats)); return true; }
+    catch (e) { return false; }
+  }
+
+  /** Returns the full ordered list: defaults first, then user-defined. */
+  function getCategories () {
+    return [...DEFAULT_CATEGORIES, ...loadCustomCategories()];
+  }
+
+  /**
+   * Stable colour per category name.
+   * Defaults use CATEGORY_COLORS; custom names get a deterministic
+   * pick from CUSTOM_CAT_PALETTE via a simple string hash.
+   */
+  function categoryColor (name) {
+    if (CATEGORY_COLORS[name]) return CATEGORY_COLORS[name];
+    let h = 0;
+    for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xfffffff;
+    return CUSTOM_CAT_PALETTE[Math.abs(h) % CUSTOM_CAT_PALETTE.length];
+  }
+
+  /** Emoji icon for a category — defaults use CATEGORY_ICONS, customs get 🏷️. */
+  function categoryIcon (name) {
+    return CATEGORY_ICONS[name] || '🏷️';
+  }
+
+  /**
+   * Rebuild <option> elements inside `selectEl`.
+   * Preserves any currently-selected value; safe to call at any time.
+   */
+  function buildCategoryOptions (selectEl, { includeAll = false, selected = '' } = {}) {
+    const cats = getCategories();
+    let html   = includeAll ? '<option value="">All categories</option>' : '';
+    for (const cat of cats) {
+      const icon = categoryIcon(cat);
+      const sel  = selected === cat ? ' selected' : '';
+      // \u00a0 = non-breaking space keeps icon + name from wrapping oddly
+      html += `<option value="${escHtml(cat)}"${sel}>${escHtml(icon + '\u00a0' + cat)}</option>`;
+    }
+    selectEl.innerHTML = html;
+  }
+
+  /** Refresh all three category selects (add form, edit modal, filter bar). */
+  function refreshCategorySelects () {
+    const addSel    = document.getElementById('manual-category');
+    const editSel   = document.getElementById('edit-category');
+    const filterSel = document.getElementById('filter-category');
+    if (addSel)    buildCategoryOptions(addSel,
+                     { selected: addSel.value || 'Uncategorized' });
+    if (editSel)   buildCategoryOptions(editSel,
+                     { selected: editSel.value });
+    if (filterSel) buildCategoryOptions(filterSel,
+                     { includeAll: true, selected: filterSel.value });
+  }
+
+  /** Render the list of custom categories inside the settings panel. */
+  function renderCategorySettings () {
+    const container = document.getElementById('settings-cat-list');
+    if (!container) return;
+    const customs = loadCustomCategories();
+    if (customs.length === 0) {
+      container.innerHTML = `<p class="settings-cat-empty">No custom categories yet.</p>`;
+      return;
+    }
+    container.innerHTML = customs.map(name => `
+      <div class="settings-cat-item">
+        <span class="settings-cat-icon">${categoryIcon(name)}</span>
+        <span class="settings-cat-name">${escHtml(name)}</span>
+        <button class="settings-cat-delete" data-catdelete="${escHtml(name)}"
+                aria-label="Delete ${escHtml(name)}">✕</button>
+      </div>`).join('');
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §8-D  RECURRING TRANSACTIONS
+     Templates stored under KEY_RECURRING. processRecurring() is
+     called at bootstrap and adds overdue entries in one batch write.
+  ══════════════════════════════════════════════════════════════ */
+
+  const KEY_RECURRING = 'mt_recurring';
+
+  function loadRecurring () {
+    try {
+      const raw = localStorage.getItem(KEY_RECURRING);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) { return []; }
+  }
+
+  function saveRecurring (templates) {
+    try { localStorage.setItem(KEY_RECURRING, JSON.stringify(templates)); return true; }
+    catch (e) { return false; }
+  }
+
+  /**
+   * Advance a YYYY-MM-DD date by one frequency period.
+   * Handles month-end clamping: Jan 31 + monthly → Feb 28, not Mar 3.
+   */
+  function advanceDate (dateStr, frequency) {
+    const [y, m, d] = dateStr.split('-').map(Number);
+    let dt;
+    if (frequency === 'daily')   dt = new Date(y, m - 1, d + 1);
+    if (frequency === 'weekly')  dt = new Date(y, m - 1, d + 7);
+    if (frequency === 'monthly') {
+      const nm  = m === 12 ? 1  : m + 1;
+      const ny  = m === 12 ? y + 1 : y;
+      const max = new Date(ny, nm, 0).getDate();   // last day of target month
+      dt = new Date(ny, nm - 1, Math.min(d, max));
+    }
+    if (!dt) {
+      // Corrupted template data — return the input date unchanged rather than
+      // crashing with a cryptic TypeError on dt.getFullYear().
+      console.warn('[MT] advanceDate: unknown frequency', frequency, '— skipping');
+      return dateStr;
+    }
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+  }
+
+  /**
+   * Add all overdue recurring transactions in one batch write.
+   * Called at startup BEFORE renderApp() so the first render is complete.
+   */
+  function processRecurring () {
+    const templates = loadRecurring();
+    if (templates.length === 0) return;
+
+    const today   = todayStr();
+    const wallets = loadWallets();
+    const newTxns = [];
+
+    for (const tmpl of templates) {
+      if (tmpl.paused) continue;
+      if (!wallets.find(w => w.id === tmpl.walletId)) continue;  // wallet deleted
+      while (tmpl.nextDue <= today) {
+        newTxns.push({
+          id:          makeId(),
+          walletId:    tmpl.walletId,
+          description: tmpl.description,
+          amount:      tmpl.amount,
+          type:        tmpl.type,
+          category:    tmpl.category,
+          date:        tmpl.nextDue,
+        });
+        const next = advanceDate(tmpl.nextDue, tmpl.frequency);
+        if (next <= tmpl.nextDue) {
+          // advanceDate returned the same (or earlier) date — unknown frequency.
+          // Break instead of looping forever; the guard in advanceDate already
+          // logged a warning. The template stays at this nextDue until repaired.
+          console.warn('[MT] processRecurring: date did not advance for template', tmpl.id, '— breaking loop');
+          break;
+        }
+        tmpl.nextDue = next;
+      }
+    }
+
+    if (newTxns.length === 0) return;
+
+    // One batch save — prepend newest-first, then existing transactions
+    newTxns.sort((a, b) => b.date.localeCompare(a.date));
+    saveTransactions([...newTxns, ...loadTransactions()]);
+    saveRecurring(templates);
+
+    // Show toast after first render settles
+    const msg = newTxns.length === 1
+      ? `🔁 Auto-added: ${newTxns[0].description}`
+      : `🔁 Auto-added ${newTxns.length} recurring transactions`;
+    setTimeout(() => showToast(msg), 500);
+  }
+
+  /** Render the recurring list inside the settings panel. */
+  function renderRecurringSettings () {
+    const container = document.getElementById('settings-rec-list');
+    if (!container) return;
+    const templates = loadRecurring();
+    const today     = todayStr();
+
+    if (templates.length === 0) {
+      container.innerHTML = `
+        <p class="settings-cat-empty" style="margin-bottom:10px;">
+          No recurring transactions yet.
+        </p>`;
+      return;
+    }
+
+    container.innerHTML = templates.map(tmpl => {
+      const icon     = categoryIcon(tmpl.category);
+      const dueColor = tmpl.nextDue <= today ? 'var(--expense)' : 'var(--muted)';
+      const dueText  = tmpl.nextDue <= today
+        ? 'due today'
+        : 'next ' + formatDateShort(tmpl.nextDue);
+      const pauseLabel = tmpl.paused ? '▶' : '⏸';
+      const pauseTitle = tmpl.paused ? 'Resume' : 'Pause';
+      return `
+        <div class="rec-item${tmpl.paused ? ' rec-paused' : ''}">
+          <span class="settings-cat-icon">${icon}</span>
+          <div class="rec-item-info">
+            <span class="rec-item-name">${escHtml(tmpl.description)}</span>
+            <span class="rec-item-meta">
+              $${fmt(tmpl.amount)} · ${escHtml(tmpl.type)} · ${escHtml(tmpl.frequency)}
+              · <span style="color:${dueColor};">${escHtml(dueText)}</span>
+            </span>
+          </div>
+          <button class="rec-pause-btn" data-recpause="${escHtml(tmpl.id)}"
+                  title="${pauseTitle}" aria-label="${pauseTitle}">${pauseLabel}</button>
+          <button class="settings-cat-delete" data-recdelete="${escHtml(tmpl.id)}"
+                  aria-label="Delete ${escHtml(tmpl.description)}">✕</button>
+        </div>`;
+    }).join('');
+  }
+
+  /** Animate a balance element counting from `from` to `to`. */
+  function animateBalance (el, from, to) {
+    const duration = 480;
+    const t0 = performance.now();
+    function tick (now) {
+      const t = Math.min((now - t0) / duration, 1);
+      const e = 1 - Math.pow(1 - t, 3);  // ease-out cubic
+      const v = from + (to - from) * e;
+      const abs = Math.abs(v);
+      el.textContent = (v < 0 ? '-$' : '$') +
+        abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      if (t < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  // ── Category keyword table ────────────────────────────────────
+  const CATEGORY_KEYWORDS = [
+    { name: 'Food & Drinks',
+      words: ['lunch','dinner','breakfast','coffee','food','eat','restaurant',
+              'pizza','burger','groceries','snack','drinks'] },
+    { name: 'Transportation',
+      words: ['uber','lyft','gas','bus','train','taxi','parking','toll',
+              'subway','metro','ride'] },
+    { name: 'Shopping',
+      words: ['amazon','mall','clothes','shoes','store','shop','bought'] },
+    { name: 'Bills & Utilities',
+      words: ['rent','electric','water','internet','phone','bill',
+              'subscription','netflix','spotify'] },
+    { name: 'Health',
+      words: ['doctor','pharmacy','medicine','gym','hospital','dentist'] },
+    { name: 'Entertainment',
+      words: ['movie','game','ticket','concert','bar','club'] }
+  ];
+
+  // Keyword lists per spec — checked case-insensitively
+  const EXPENSE_KEYWORDS = ['spent','bought','paid','used','minus','withdrew','charged'];
+  const INCOME_KEYWORDS  = ['added','earned','received','plus','deposited','put in','got'];
+
+  /**
+   * Extract the first dollar amount from a free-text sentence.
+   * Requires either a leading $ sign OR a word boundary so bare
+   * numbers inside words ("1080p", "2fa") are not captured.
+   * Returns a positive number (2 dp) or null.
+   */
+  function extractAmount (text) {
+    const m = text.match(/(?<!\w)\$?([\d,]+(\.\d{1,2})?)(?!\w)/);
+    if (!m) return null;
+    const val = parseFloat(m[1].replace(/,/g, ''));
+    if (isNaN(val) || val <= 0) return null;
+    return Math.round(val * 100) / 100;
+  }
+
+  /**
+   * Detect transaction type by keyword scan.
+   * Strips numeric tokens first so "Put $50 in my wallet" normalises to
+   * "Put  in my wallet" → "put in" substring match succeeds.
+   * Returns 'income' | 'expense' | 'assumed-expense'.
+   */
+  function detectType (text) {
+    const normalised = text
+      .replace(/\$?[\d,]+(\.\d{1,2})?/g, ' ')  // remove amount tokens
+      .replace(/\s+/g, ' ')                       // collapse whitespace
+      .toLowerCase();
+
+    // Check income first (so "got" doesn't shadow single-word expense hits)
+    for (const kw of INCOME_KEYWORDS)  { if (normalised.includes(kw)) return 'income';  }
+    for (const kw of EXPENSE_KEYWORDS) { if (normalised.includes(kw)) return 'expense'; }
+    return 'assumed-expense';
+  }
+
+  /**
+   * Auto-assign a category from the description (case-insensitive, first match wins).
+   * Returns a category name string or 'Uncategorized'.
+   */
+  function detectCategory (text) {
+    const lower = text.toLowerCase();
+    for (const cat of CATEGORY_KEYWORDS) {
+      for (const word of cat.words) {
+        if (lower.includes(word)) return cat.name;
+      }
+    }
+    return 'Uncategorized';
+  }
+
+  /**
+   * Parse a free-text sentence into a ready-to-save transaction object.
+   * Returns { tx, assumed: boolean } or { error: string }.
+   */
+  /**
+   * Scan `text` for a natural-language date expression.
+   * Returns { date: 'YYYY-MM-DD', cleaned: text-without-date-phrase }.
+   * If nothing is found, date = today and cleaned = original text.
+   *
+   * Recognised patterns (evaluated most-specific first):
+   *   "yesterday" / "yest" / "yday"
+   *   "2 days ago" / "a day ago"
+   *   "last week"
+   *   "last Monday" (always the previous week, even if today is Monday)
+   *   "Monday" / "on Friday" / "this Tuesday" (most-recent occurrence incl. today)
+   *   "on the 5th" / "the 15th" (current or previous month)
+   */
+  function extractDate (text) {
+    const today = todayStr();
+
+    function isoDate (dt) {
+      return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    }
+    function daysAgo (n) {
+      const [y, m, d] = today.split('-').map(Number);
+      return isoDate(new Date(y, m - 1, d - n));
+    }
+    // Most recent weekday (incl. today if dow matches)
+    function nearestWeekday (dow) {
+      const [y, m, d] = today.split('-').map(Number);
+      const diff = ((new Date(y, m - 1, d).getDay() - dow) + 7) % 7;
+      return diff === 0 ? today : daysAgo(diff);
+    }
+    // "last X" — always at least 1 full week back for same-day
+    function strictLastWeekday (dow) {
+      const [y, m, d] = today.split('-').map(Number);
+      let diff = new Date(y, m - 1, d).getDay() - dow;
+      if (diff <= 0) diff += 7;
+      return daysAgo(diff);
+    }
+
+    const DOW = {
+      sun:0, sunday:0, mon:1, monday:1, tue:2, tues:2, tuesday:2,
+      wed:3, wednesday:3, thu:4, thur:4, thurs:4, thursday:4,
+      fri:5, friday:5, sat:6, saturday:6,
+    };
+    const N = Object.keys(DOW).join('|');
+
+    const patterns = [
+      { re: /\b(yesterday|yest|yday)\b/i,
+        fn: ()  => daysAgo(1) },
+
+      { re: /\b(\d+|a)\s+days?\s+ago\b/i,
+        fn: m   => daysAgo(m[1] === 'a' ? 1 : +m[1]) },
+
+      { re: /\blast\s+week\b/i,
+        fn: ()  => daysAgo(7) },
+
+      { re: new RegExp(`\\blast\\s+(${N})\\b`, 'i'),
+        fn: m   => strictLastWeekday(DOW[m[1].toLowerCase()]) },
+
+      { re: new RegExp(`\\b(?:on\\s+|this\\s+)?(${N})\\b`, 'i'),
+        fn: m   => nearestWeekday(DOW[m[1].toLowerCase()]) },
+
+      { re: /\b(?:on\s+)?the\s+(\d{1,2})(?:st|nd|rd|th)?\b/i,
+        fn: m   => {
+          const n  = +m[1];
+          if (n < 1 || n > 31) return null;
+          const [y, mo] = today.split('-').map(Number);
+          const pad = v => String(v).padStart(2, '0');
+          const cand = `${y}-${pad(mo)}-${pad(n)}`;
+          if (cand <= today) return cand;
+          // This month's date is still ahead → use the previous month
+          const pm = mo === 1 ? 12 : mo - 1;
+          const py = mo === 1 ? y - 1 : y;
+          if (n > new Date(py, pm, 0).getDate()) return null;
+          return `${py}-${pad(pm)}-${pad(n)}`;
+        }
+      },
+    ];
+
+    for (const { re, fn } of patterns) {
+      const m = text.match(re);
+      if (!m) continue;
+      const date = fn(m);
+      if (!date || date > today) continue;    // never produce a future date
+
+      const cleaned = text
+        .replace(m[0], ' ')            // remove the matched date phrase
+        .replace(/\s{2,}/g, ' ')       // collapse gaps
+        .replace(/^[\s,]+|[\s,]+$/g, '') // trim stray commas
+        .replace(/^(on|for|at)\s+/i, '') // drop leading filler word
+        .trim();
+
+      return { date, cleaned };
+    }
+
+    return { date: today, cleaned: text };
+  }
+
+  function parseSmartInput (text) {
+    const amount = extractAmount(text);
+    if (amount === null) {
+      return { error: "Couldn't find an amount. Try: 'Spent $12 for lunch'" };
+    }
+
+    const { date, cleaned } = extractDate(text);
+    const desc    = cleaned.trim() || text.trim();
+    const rawType = detectType(text);
+    const assumed = rawType === 'assumed-expense';
+
+    const tx = {
+      id:          makeId(),
+      date,
+      type:        assumed ? 'expense' : rawType,
+      amount,
+      description: desc,
+      category:    detectCategory(desc),
+    };
+    if (assumed) tx.assumed = true;
+
+    return { tx, assumed };
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §8  INPUT SECTION  —  Submit Handlers & Mode Toggle
+  ══════════════════════════════════════════════════════════════ */
+
+  // ── Shared commit helper ──────────────────────────────────────
+  /**
+   * Persist a transaction and refresh the UI.
+   * Shows the 2-second toast confirmation per spec.
+   */
+  function commitTransaction (tx, assumed) {
+    const wallet = getActiveWallet();
+    if (!wallet) { showToast('⚠ No wallet selected.', true); return; }
+    if (!addTransaction({ ...tx, walletId: wallet.id })) return;
+    const typeLabel  = tx.type === 'income' ? 'income' : 'expense';
+    const flag       = assumed ? ' ⚠ assumed expense' : '';
+    const dateNote   = tx.date !== todayStr() ? ` · ${formatDateShort(tx.date)}` : '';
+    showToast(`✓ Added: ${tx.description} — $${fmt(tx.amount)} (${typeLabel})${dateNote}${flag}`);
+    renderApp();
+  }
+
+  // ── Smart Input submit ────────────────────────────────────────
+  function handleSmartSubmit () {
+    const inputEl = document.getElementById('smart-input');
+    const errEl   = document.getElementById('smart-input-error');
+    const text    = inputEl.value.trim();
+
+    errEl.classList.add('hidden');
+
+    if (!text) {
+      errEl.textContent = "Type something first, e.g. 'Spent $8 for lunch'";
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    const result = parseSmartInput(text);
+    if (result.error) {
+      errEl.textContent = result.error;
+      errEl.classList.remove('hidden');
+      return;
+    }
+
+    commitTransaction(result.tx, result.assumed);
+    inputEl.value = '';
+    inputEl.focus();
+  }
+
+  // ── Manual Form submit ────────────────────────────────────────
+  function handleManualSubmit () {
+    const date   = document.getElementById('manual-date').value;
+    const type   = document.getElementById('manual-type').value;
+    const rawAmt = document.getElementById('manual-amount').value.trim();
+    const desc   = document.getElementById('manual-desc').value.trim();
+    const cat    = document.getElementById('manual-category').value;
+    const amount = parseFloat(rawAmt);
+    const errEl  = document.getElementById('manual-form-error');
+
+    // Show inline error (consistent with smart input) and focus the offending field
+    function showFormError (msg, focusId) {
+      errEl.textContent = msg;
+      errEl.classList.remove('hidden');
+      if (focusId) document.getElementById(focusId).focus();
+    }
+    errEl.classList.add('hidden');
+
+    if (!date)                        return showFormError('Please select a date.', 'manual-date');
+    if (!desc)                        return showFormError('Please enter a description.', 'manual-desc');
+    if (isNaN(amount) || amount <= 0) return showFormError('Please enter a valid amount greater than 0.', 'manual-amount');
+
+    commitTransaction({
+      id:          makeId(),
+      date,
+      type,
+      amount:      Math.round(amount * 100) / 100,
+      description: desc,
+      category:    cat
+    }, false);
+
+    // Reset amount + description; keep date & type for rapid repeat entry
+    document.getElementById('manual-amount').value = '';
+    document.getElementById('manual-desc').value   = '';
+    document.getElementById('manual-form-error').classList.add('hidden');
+    document.getElementById('manual-amount').focus();
+  }
+
+  // ── Mode toggles ──────────────────────────────────────────────
+  function switchToManual () {
+    document.getElementById('smart-input-wrap').classList.add('hidden');
+    document.getElementById('manual-form-wrap').classList.remove('hidden');
+    document.getElementById('manual-amount').focus();
+  }
+
+  function switchToSmart () {
+    document.getElementById('manual-form-wrap').classList.add('hidden');
+    document.getElementById('smart-input-wrap').classList.remove('hidden');
+    document.getElementById('smart-input').focus();
+  }
+
+  // ── Register all input-section listeners (called once at bootstrap) ──
+  function initInputSection () {
+    // Default the date picker to today
+    document.getElementById('manual-date').value = todayStr();
+
+    // Smart input: Enter key + Add button
+    document.getElementById('smart-input')
+      .addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); handleSmartSubmit(); }
+      });
+    document.getElementById('btn-smart-submit')
+      .addEventListener('click', handleSmartSubmit);
+
+    // Manual form: submit button
+    document.getElementById('btn-manual-submit')
+      .addEventListener('click', handleManualSubmit);
+
+    // Toggle links
+    document.getElementById('btn-to-manual').addEventListener('click', switchToManual);
+    document.getElementById('btn-to-smart').addEventListener('click', switchToSmart);
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §8-B  THEME
+  ══════════════════════════════════════════════════════════════ */
+  const KEY_THEME = 'mt_theme';
+
+  function applyTheme (t) {
+    if (t === 'light') {
+      document.documentElement.dataset.theme = 'light';
+    } else if (t === 'auto') {
+      document.documentElement.dataset.theme = 'auto';
+    } else {
+      delete document.documentElement.dataset.theme;  // dark = no attribute
+    }
+    // Sync the browser chrome colour; for 'auto' read the current system pref
+    const systemLight = matchMedia('(prefers-color-scheme: light)').matches;
+    const isLight = t === 'light' || (t === 'auto' && systemLight);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = isLight ? '#f1f5f9' : '#0f0f1a';
+  }
+
+  // Re-sync theme-color if the OS appearance changes while app is open
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if ((localStorage.getItem(KEY_THEME) || 'dark') === 'auto') applyTheme('auto');
+  });
+
+  function themeLabel (t) {
+    return t === 'light' ? 'Light' : t === 'auto' ? 'Auto' : 'Dark';
+  }
+
+  function cycleTheme () {
+    const current = localStorage.getItem(KEY_THEME) || 'dark';
+    const next    = current === 'dark' ? 'light' : current === 'light' ? 'auto' : 'dark';
+    try { localStorage.setItem(KEY_THEME, next); } catch (e) { /* ignore */ }
+    applyTheme(next);
+    const val = document.getElementById('settings-theme-value');
+    if (val) val.textContent = themeLabel(next);
+  }
+
+  /* ══════════════════════════════════════════════════════════════
+     §9  DASHBOARD  —  renderDashboard()
+     Rebuilds #dashboard-content innerHTML on every renderApp() call.
+     Re-attaches the edit-balance listener since the node is recreated.
+  ══════════════════════════════════════════════════════════════ */
+  function renderDashboard (txns = null) {
+    const wallet  = getActiveWallet();
+    if (!wallet) { document.getElementById('dashboard-content').innerHTML = ''; return; }
+
+    const wallets  = loadWallets();
+    const balance  = computeRunningBalance(txns);
+    const stats    = getPeriodStats(_statPeriod, txns);
+    const isNeg    = balance < 0;
+    const balStr   = (isNeg ? '-$' : '$') + fmt(Math.abs(balance));
+    const balClass = isNeg ? 'balance-negative' : 'balance-positive';
+    const netPos   = stats.net >= 0;
+    const netStr   = (netPos ? '+$' : '-$') + fmt(Math.abs(stats.net));
+    const netClass = netPos ? 'text-income' : 'text-expense';
+    const countHint = wallets.length > 1
+      ? `<span style="font-size:0.72rem;color:var(--muted);font-weight:400;">${wallets.length} wallets</span>`
+      : '';
+    const periodLabel = _statPeriod === 'week'  ? 'This Week'
+                      : _statPeriod === 'month' ? 'This Month'
+                      : 'All Time';
+    const pBtn = (p, lbl) =>
+      `<button class="period-btn${_statPeriod === p ? ' active' : ''}" data-period="${p}"
+               role="radio" aria-checked="${_statPeriod === p}">${lbl}</button>`;
+
+    const prevBalance    = _lastBalance;
+    const balanceChanged = _lastBalance !== null && _lastBalance !== balance;
+    _lastBalance         = balance;
+
+    document.getElementById('dashboard-content').innerHTML = `
+      <div class="wallet-selector-row">
+        <button class="wallet-selector-btn" id="btn-open-wallets" aria-label="Switch wallet">
+          <span class="wallet-selector-name">${escHtml(wallet.name)}</span>
+          ${countHint}
+          <span class="wallet-selector-caret">▾</span>
+        </button>
+      </div>
+
+      <div class="dashboard-balance-row">
+        <div>
+          <div class="balance-label">Wallet Balance</div>
+          <div id="balance-amount-display" class="balance-amount ${balClass}">${balStr}</div>
+        </div>
+        <button class="btn-edit-balance" id="btn-edit-balance">✏ Edit wallet</button>
+      </div>
+
+      <div class="period-toggle" role="radiogroup" aria-label="Stats period">
+        ${pBtn('week',  'Week')}
+        ${pBtn('month', 'Month')}
+        ${pBtn('all',   'All Time')}
+      </div>
+
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-label">${escHtml(periodLabel)} Income</div>
+          <div class="stat-value text-income">+$${fmt(stats.income)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">${escHtml(periodLabel)} Expenses</div>
+          <div class="stat-value text-expense">-$${fmt(stats.expense)}</div>
+        </div>
+      </div>
+
+      <div class="net-label">
+        Net ${escHtml(periodLabel)}:&nbsp;
+        <span class="net-value ${netClass}">${netStr}</span>
+      </div>
+    `;
+    // Note: no addEventListener here — header delegation in bootstrap() handles these
+
+    // Balance animation: pop scale + numeric count up/down when value changes
+    if (balanceChanged) {
+      const balEl = document.getElementById('balance-amount-display');
+      if (balEl) {
+        balEl.classList.add('balance-changed');
+        balEl.addEventListener('animationend', () => balEl.classList.remove('balance-changed'), { once: true });
+        animateBalance(balEl, prevBalance, balance);
+      }
+    }
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §9-C  CHART SECTION  —  renderChart()
+     Donut chart showing expense breakdown by category for the
+     active wallet and selected period. Renders into #chart-section.
+     Responds automatically to the period toggle in the dashboard.
+  ══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Shared period-filter helper.
+   * Returns the subset of `txns` belonging to `walletId` and
+   * falling within `period` ('week' | 'month' | 'all').
+   * Mirrors the filter logic in getPeriodStats.
+   */
+  function _getPeriodTxns (walletId, period, txns) {
+    const base = txns.filter(t => t.walletId === walletId);
+    if (period === 'week') {
+      const today = new Date();
+      const dow   = today.getDay();
+      const toMon = dow === 0 ? -6 : 1 - dow;
+      const mon   = new Date(today);
+      mon.setDate(today.getDate() + toMon);
+      const sun = new Date(mon);
+      sun.setDate(mon.getDate() + 6);
+      // Use local date parts — toISOString() converts to UTC first and produces
+      // the wrong calendar date for users in UTC+ or UTC− timezones.
+      const localStr = dt => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+      const monStr = localStr(mon);
+      const sunStr = localStr(sun);
+      return base.filter(t => t.date >= monStr && t.date <= sunStr);
+    }
+    if (period === 'month') {
+      const now  = new Date();
+      const y    = now.getFullYear();
+      const m    = String(now.getMonth() + 1).padStart(2, '0');
+      const last = new Date(y, now.getMonth() + 1, 0).getDate();
+      const s    = `${y}-${m}-01`;
+      const e    = `${y}-${m}-${String(last).padStart(2, '0')}`;
+      return base.filter(t => t.date >= s && t.date <= e);
+    }
+    return base; // 'all'
+  }
+
+  function renderChart (txns = null) {
+    const container = document.getElementById('chart-section');
+    if (!container) return;
+
+    const wallet = getActiveWallet();
+    if (!wallet) { container.innerHTML = ''; return; }
+
+    const all      = txns !== null ? txns : loadTransactions();
+    const filtered = _getPeriodTxns(wallet.id, _statPeriod, all);
+    const expenses = filtered.filter(t => t.type === 'expense');
+
+    const periodLabel = _statPeriod === 'week'  ? 'This Week'
+                      : _statPeriod === 'month' ? 'This Month' : 'All Time';
+    const periodShort = _statPeriod === 'week'  ? 'Week'
+                      : _statPeriod === 'month' ? 'Month'      : 'All time';
+
+    if (expenses.length === 0) {
+      container.innerHTML = `
+        <div class="card">
+          <div class="chart-card-header">
+            <span class="stat-label">Expense Breakdown</span>
+            <span class="stat-label" style="color:var(--accent);">${escHtml(periodLabel)}</span>
+          </div>
+          <p class="chart-empty">No expenses ${_statPeriod === 'all' ? 'yet' : 'this ' + _statPeriod} to show.</p>
+        </div>`;
+      return;
+    }
+
+    // ── Aggregate by category ────────────────────────────────
+    const catMap = Object.create(null);
+    for (const tx of expenses) {
+      catMap[tx.category] = (catMap[tx.category] || 0) + tx.amount;
+    }
+    const total  = Object.values(catMap).reduce((s, v) => s + v, 0);
+    const slices = Object.entries(catMap)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amount]) => ({
+        name, amount,
+        pct:   amount / total,
+        color: categoryColor(name),
+        icon:  categoryIcon(name),
+      }));
+
+    // ── SVG donut ────────────────────────────────────────────
+    // Stroke-dasharray technique: r=45, stroke-width=22 →
+    //   outer edge = 56 px, inner edge = 34 px (donut hole)
+    const R  = 45;
+    const SW = 22;
+    const C  = 2 * Math.PI * R;   // ≈ 282.74
+    const cx = 70, cy = 70;
+
+    // Compact total that fits the 120×120 centre
+    const totalLabel = total >= 10000
+      ? '$' + (total / 1000).toFixed(1) + 'k'
+      : '$' + total.toFixed(0);
+
+    let cumPct = 0;
+    const circles = slices.map(s => {
+      // Subtract 2 px from each slice to create a thin gap between segments
+      const dash   = Math.max(0, s.pct * C - 2);
+      const gap    = C - dash;
+      const offset = -(cumPct * C);
+      cumPct += s.pct;
+      return `<circle cx="${cx}" cy="${cy}" r="${R}"
+        fill="none" stroke="${s.color}" stroke-width="${SW}"
+        stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}"
+        stroke-dashoffset="${offset.toFixed(2)}"
+        transform="rotate(-90 ${cx} ${cy})"/>`;
+    }).join('');
+
+    const svgMark = `
+      <svg viewBox="0 0 140 140" width="120" height="120"
+           xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <!-- Track ring -->
+        <circle cx="${cx}" cy="${cy}" r="${R}" fill="none"
+                stroke="var(--border)" stroke-width="${SW}"/>
+        ${circles}
+        <!-- Centre labels -->
+        <text x="${cx}" y="${cy - 6}" text-anchor="middle"
+              font-family="system-ui,sans-serif" font-size="9" font-weight="700"
+              fill="var(--muted)" letter-spacing="0.5">${escHtml(periodShort.toUpperCase())}</text>
+        <text x="${cx}" y="${cy + 9}" text-anchor="middle"
+              font-family="system-ui,sans-serif" font-size="13" font-weight="800"
+              fill="var(--text)">${escHtml(totalLabel)}</text>
+      </svg>`;
+
+    // ── Legend rows ──────────────────────────────────────────
+    const legendRows = slices.map(s => `
+      <div class="legend-item">
+        <span class="legend-dot" style="background:${s.color}"></span>
+        <span class="legend-name">${s.icon} ${escHtml(s.name)}</span>
+        <span class="legend-vals">
+          <span class="legend-pct">${Math.round(s.pct * 100)}%</span>
+          <span class="legend-amt">$${fmt(s.amount)}</span>
+        </span>
+      </div>`).join('');
+
+    container.innerHTML = `
+      <div class="card chart-card">
+        <div class="chart-card-header">
+          <span class="stat-label">Expense Breakdown</span>
+          <span class="stat-label" style="color:var(--accent);">${escHtml(periodLabel)}</span>
+        </div>
+        <div class="chart-wrap">
+          <div class="donut-wrap">${svgMark}</div>
+          <div class="chart-legend">${legendRows}</div>
+        </div>
+      </div>`;
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §10  TRANSACTION HISTORY  —  renderHistory() & event delegation
+     Transactions are grouped by date (newest first).
+     A single click listener on the stable #history-section handles
+     both edit and delete without re-attaching on every render.
+  ══════════════════════════════════════════════════════════════ */
+
+  /** Escape user content before innerHTML insertion — prevents XSS */
+  function escHtml (str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function renderHistory (txns = null) {
+    const container = document.getElementById('history-section');
+    const wallet    = getActiveWallet();
+    const all       = txns !== null ? txns : loadTransactions();
+    const walletTxns = wallet
+      ? all.filter(t => t.walletId === wallet.id)
+      : [];
+
+    if (walletTxns.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <p style="font-size:1.5rem; margin-bottom:8px;">📋</p>
+          <p style="font-weight:600; color:var(--text);">No transactions yet</p>
+          <p style="font-size:0.85rem; margin-top:4px;">Add your first one above ↑</p>
+        </div>`;
+      return;
+    }
+
+    // ── Apply search / type / category filters ───────────────
+    let displayTxns = walletTxns;
+    if (_filterType !== 'all') {
+      displayTxns = displayTxns.filter(t => t.type === _filterType);
+    }
+    if (_filterCategory) {
+      displayTxns = displayTxns.filter(t => t.category === _filterCategory);
+    }
+    if (_searchQuery) {
+      const q = _searchQuery.toLowerCase();
+      displayTxns = displayTxns.filter(t =>
+        t.description.toLowerCase().includes(q) ||
+        (t.category || '').toLowerCase().includes(q)
+      );
+    }
+    const isFiltered = displayTxns.length !== walletTxns.length;
+
+    if (displayTxns.length === 0) {
+      container.innerHTML = `
+        <div class="empty-state">
+          <p style="font-size:1.5rem; margin-bottom:8px;">🔍</p>
+          <p style="font-weight:600; color:var(--text);">No matching transactions</p>
+          <p style="font-size:0.85rem; margin-top:4px;">Try adjusting your search or filters.</p>
+        </div>`;
+      return;
+    }
+
+    // Group by date (displayTxns already newest-first from addTransaction)
+    // Slice to the current page limit; the Load More button extends it.
+    const visibleTxns = displayTxns.slice(0, _historyLimit);
+
+    const groups = Object.create(null);
+    for (const tx of visibleTxns) {
+      if (!groups[tx.date]) groups[tx.date] = [];
+      groups[tx.date].push(tx);
+    }
+    const dates = Object.keys(groups).sort((a, b) => b.localeCompare(a));
+
+    let html = isFiltered
+      ? `<p class="filter-results-note">${displayTxns.length} of ${walletTxns.length} transactions</p>`
+      : '';
+
+    for (const date of dates) {
+      // Sticky section header: "Today" / "Yesterday" / "May 5"
+      html += `<div class="date-header">${escHtml(formatDateLabel(date))}</div>`;
+
+      for (const tx of groups[date]) {
+        const isIncome  = tx.type === 'income';
+        const rowClass  = isIncome ? 'income-row'  : 'expense-row';
+        const amtClass  = isIncome ? 'text-income' : 'text-expense';
+        const amtPrefix = isIncome ? '+$' : '-$';
+        const icon      = categoryIcon(tx.category);
+        const badge     = tx.assumed
+          ? `<span class="assumed-badge" aria-label="Warning: type was automatically assumed as expense">⚠ assumed</span>`
+          : '';
+
+        // Each row is wrapped in a .tx-swipe-wrap so horizontal swipe reveals
+        // ✏ Edit (right) and 🗑 Delete (left) without tapping tiny icon buttons.
+        html += `
+          <div class="tx-swipe-wrap" data-swipe-id="${escHtml(tx.id)}">
+            <div class="tx-swipe-bg tx-swipe-bg-edit"  aria-hidden="true">✏ Edit</div>
+            <div class="tx-swipe-bg tx-swipe-bg-delete" aria-hidden="true">🗑 Delete</div>
+            <div class="tx-row ${rowClass} tx-swipe-item">
+              <div class="tx-body">
+                <div class="tx-desc">${escHtml(tx.description)}${badge}</div>
+                <div class="tx-meta">
+                  <span style="font-size:0.75rem;color:var(--muted);">
+                    ${escHtml(formatDateShort(tx.date))}
+                  </span>
+                  <span class="pill" title="${escHtml(tx.category)}">${icon} ${escHtml(tx.category)}</span>
+                </div>
+              </div>
+              <span class="tx-amount ${amtClass}">${amtPrefix}${fmt(tx.amount)}</span>
+              <div class="tx-actions">
+                <button class="btn-icon"
+                        data-action="edit"
+                        data-id="${escHtml(tx.id)}"
+                        aria-label="Edit transaction">✏</button>
+                <button class="btn-icon danger"
+                        data-action="delete"
+                        data-id="${escHtml(tx.id)}"
+                        aria-label="Delete transaction">🗑</button>
+              </div>
+            </div>
+          </div>`;
+      }
+    }
+
+    // Load More button — shown when the slice doesn't cover all matched transactions
+    const remaining = displayTxns.length - visibleTxns.length;
+    if (remaining > 0) {
+      const batch = Math.min(50, remaining);
+      html += `
+        <div class="load-more-wrap">
+          <button class="btn-load-more" data-action="load-more">
+            Show ${batch} more
+            <span class="load-more-remain"> · ${remaining} remaining</span>
+          </button>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  /** Register delegated listener + edit-save button — called once at bootstrap */
+  function initHistorySection () {
+    // Delegated click: bubbles up from ✏/🗑 to the stable container
+    document.getElementById('history-section')
+      .addEventListener('click', ev => {
+        const btn = ev.target.closest('[data-action]');
+        if (!btn) return;
+        const { action, id } = btn.dataset;
+        if (action === 'load-more')      { _historyLimit += 50; renderHistory(); return; }
+        if (action === 'edit')           openEditModal(id);
+        if (action === 'delete')         handleDeleteTx(id);
+        if (action === 'delete-cancel')  cancelDeleteTx(id);
+        if (action === 'delete-confirm') doDeleteTx(id);
+      });
+
+    // Edit modal save button (static element — wire once)
+    document.getElementById('btn-edit-save')
+      .addEventListener('click', handleEditSave);
+  }
+
+  // Show inline confirm buttons inside the tx row — no native dialog
+  function handleDeleteTx (id) {
+    // Reset any other row already in confirm state
+    document.querySelectorAll('#history-section .tx-row.is-confirming')
+      .forEach(r => {
+        const cb = r.querySelector('[data-action="delete-confirm"]');
+        if (cb) cancelDeleteTx(cb.dataset.id);
+      });
+    const delBtn = document.querySelector(
+      `#history-section [data-action="delete"][data-id="${CSS.escape(id)}"]`
+    );
+    if (!delBtn) return;
+    const row = delBtn.closest('.tx-swipe-item') || delBtn.closest('.tx-row');
+    if (!row) return;
+    row.classList.add('is-confirming');
+    row.querySelector('.tx-actions').innerHTML = `
+      <button class="btn-confirm-cancel" data-action="delete-cancel"
+              data-id="${escHtml(id)}">Cancel</button>
+      <button class="btn-confirm-delete" data-action="delete-confirm"
+              data-id="${escHtml(id)}">Delete</button>`;
+    row.querySelector('[data-action="delete-confirm"]').focus();
+  }
+
+  function cancelDeleteTx (id) {
+    const btn = document.querySelector(
+      `#history-section [data-action="delete-confirm"][data-id="${CSS.escape(id)}"]`
+    );
+    if (!btn) return;
+    const row = btn.closest('.tx-swipe-item') || btn.closest('.tx-row');
+    row.classList.remove('is-confirming');
+    row.querySelector('.tx-actions').innerHTML = `
+      <button class="btn-icon" data-action="edit" data-id="${escHtml(id)}"
+              aria-label="Edit transaction">✏</button>
+      <button class="btn-icon danger" data-action="delete" data-id="${escHtml(id)}"
+              aria-label="Delete transaction">🗑</button>`;
+  }
+
+  function doDeleteTx (id) {
+    deleteTransaction(id);
+    showToast('Transaction deleted');
+    renderApp();
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §11  EDIT MODAL  —  openEditModal() & handleEditSave()
+  ══════════════════════════════════════════════════════════════ */
+
+  function openEditModal (id) {
+    const tx = loadTransactions().find(t => t.id === id);
+    if (!tx) { showToast('Transaction not found.', true); return; }
+
+    _editingId = id;
+
+    // Pre-populate every field with the stored values
+    document.getElementById('edit-date').value     = tx.date;
+    document.getElementById('edit-type').value     = tx.type;
+    document.getElementById('edit-amount').value   = tx.amount.toFixed(2);
+    document.getElementById('edit-desc').value     = tx.description;
+
+    const editCat = document.getElementById('edit-category');
+    // Remove any stale "(deleted)" placeholder from a previous open
+    editCat.querySelectorAll('[data-deleted]').forEach(o => o.remove());
+    editCat.value = tx.category;
+    if (editCat.value !== tx.category) {
+      // The category was deleted — add a visible placeholder so the user
+      // sees what was stored and can choose to keep or change it,
+      // rather than the select silently defaulting to the first option.
+      const opt = document.createElement('option');
+      opt.value           = tx.category;
+      opt.textContent     = '🗑 ' + tx.category + ' (deleted — pick a new one or keep)';
+      opt.dataset.deleted = 'true';
+      editCat.prepend(opt);
+      editCat.value = tx.category;
+    }
+
+    openModal('modal-edit');
+    requestAnimationFrame(() => document.getElementById('edit-amount').focus());
+  }
+
+  function handleEditSave () {
+    const date   = document.getElementById('edit-date').value;
+    const type   = document.getElementById('edit-type').value;
+    const rawAmt = document.getElementById('edit-amount').value.trim();
+    const desc   = document.getElementById('edit-desc').value.trim();
+    const cat    = document.getElementById('edit-category').value;
+    const amount = parseFloat(rawAmt);
+
+    if (!date)                        return showToast('Please select a date.', true);
+    if (!desc)                        return showToast('Please enter a description.', true);
+    if (isNaN(amount) || amount <= 0) return showToast('Please enter a valid amount.', true);
+
+    updateTransaction(_editingId, {
+      date,
+      type,
+      amount:      Math.round(amount * 100) / 100,
+      description: desc,
+      category:    cat,
+      assumed:     false   // editing explicitly clears the auto-assumed flag
+    });
+
+    closeModal('modal-edit');
+    showToast('✓ Transaction updated');
+    renderApp();
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §12  CSV EXPORT
+     Columns:  Date, Type, Description, Category, Amount
+     Rules per spec:
+       • Description wrapped in double quotes: "lunch, extra"
+       • Internal double quotes doubled:       "said ""hi"""
+       • Category also quoted (may contain & or spaces)
+       • Amount: positive for income, negative for expense (-8.00)
+       • Line endings: CRLF per RFC 4180
+       • UTF-8 BOM prepended so Excel auto-detects encoding
+       • Filename: money-tracker-YYYY-MM-DD.csv  (today's date)
+  ══════════════════════════════════════════════════════════════ */
+
+  /** Build a RFC 4180 CSV string for one wallet's transactions */
+  function buildCsv (walletId, allTxns = null) {
+    // Sort oldest-first so the spreadsheet reads chronologically.
+    const txns = (allTxns !== null ? allTxns : loadTransactions())
+      .filter(t => t.walletId === walletId)
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date));
+    const rows = ['Date,Type,Description,Category,Amount'];
+
+    // Prefix any value starting with = + - @ with a tab so Excel/LibreOffice
+    // don't evaluate it as a formula (CSV injection defence).
+    // The tab is invisible in the cell but stops formula evaluation.
+    const fSafe = s => /^[=+\-@]/.test(s) ? '\t' + s : s;
+
+    for (const tx of txns) {
+      const safeDesc = '"' + fSafe(String(tx.description)).replace(/"/g, '""') + '"';
+      const safeCat  = '"' + fSafe(String(tx.category)).replace(/"/g, '""')  + '"';
+      // Raw decimal — no thousands separator so spreadsheets read it as a number
+      const rawAmt = Number(tx.amount).toFixed(2);
+      const amount = tx.type === 'income' ? rawAmt : '-' + rawAmt;
+      rows.push([tx.date, tx.type, safeDesc, safeCat, amount].join(','));
+    }
+
+    return rows.join('\r\n');
+  }
+
+  /** Trigger a single CSV download from a pre-built string */
+  function downloadCsv (csv, filename) {
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = filename; a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  /** Export button click → open the wallet picker */
+  function handleExportCsv () {
+    openExportModal();
+  }
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §13  WALLET MANAGEMENT
+     migrateToMultiWallet  — one-time migration of legacy data
+     openWalletsModal      — renders the switcher/manager modal
+     renderWalletList      — builds wallet rows with switch/edit/delete
+     handleDeleteWallet    — confirm + delete + re-render
+  ══════════════════════════════════════════════════════════════ */
+
+  /**
+   * Migrate pre-wallet data to the multi-wallet schema.
+   * Runs once: if mt_wallets already exists, returns immediately.
+   * If old mt_starting_balance / transactions exist, wraps them in
+   * a "My Wallet" with walletId stamped on every transaction.
+   */
+  function migrateToMultiWallet () {
+    if (localStorage.getItem(KEY_WALLETS) !== null) return; // already done
+
+    const existingTxns = loadTransactions();
+    // 'mt_starting_balance' is the legacy pre-multi-wallet key — read once for migration only
+    const oldBalRaw    = localStorage.getItem('mt_starting_balance');
+
+    if (existingTxns.length > 0 || oldBalRaw !== null) {
+      const oldBal = (() => {
+        try { const v = JSON.parse(oldBalRaw); return typeof v === 'number' ? v : 0; }
+        catch (e) { return 0; }
+      })();
+      const wallet = { id: makeId(), name: 'My Wallet', startingBalance: oldBal };
+      saveTransactions(existingTxns.map(t => ({ ...t, walletId: wallet.id })));
+      saveWallets([wallet]);
+      setActiveWallet(wallet.id);
+      console.log('[MT] Migrated to multi-wallet: "My Wallet"');
+    }
+    // Fresh install with no old data → wallets stay empty → first-launch modal
+  }
+
+  // ── Wallet modal open / close ─────────────────────────────────
+  function openWalletsModal () {
+    renderWalletList();
+    document.getElementById('modal-wallets-title').textContent = 'Wallets';
+    openModal('modal-wallets');
+  }
+
+  document.getElementById('btn-modal-wallets-close')
+    .addEventListener('click', () => closeModal('modal-wallets'));
+  document.getElementById('modal-wallets')
+    .addEventListener('click', ev => {
+      if (ev.target === ev.currentTarget) closeModal('modal-wallets');
+    });
+
+  // ── Wallet list renderer ──────────────────────────────────────
+  function renderWalletList () {
+    const wallets   = loadWallets();
+    const container = document.getElementById('wallet-list-items');
+
+    if (!wallets.length) {
+      container.innerHTML = `<p style="color:var(--muted);font-size:0.875rem;">No wallets yet.</p>`;
+      return;
+    }
+
+    const txns = loadTransactions();
+    container.innerHTML = wallets.map(w => {
+      const bal      = computeWalletBalance(w.id, txns, wallets);
+      const isNeg    = bal < 0;
+      const balStr   = (isNeg ? '-$' : '$') + fmt(Math.abs(bal));
+      const balClass = isNeg ? 'text-expense' : 'text-income';
+      const dot      = w.id === _activeWalletId
+        ? '<span class="wallet-active-dot"></span>' : '';
+
+      return `
+        <div class="wallet-item" data-wswitch="${escHtml(w.id)}">
+          <div class="wallet-item-body">
+            <div class="wallet-item-name">${dot}${escHtml(w.name)}</div>
+            <div class="wallet-item-bal ${balClass}">${balStr}</div>
+          </div>
+          <button class="btn-icon" data-wedit="${escHtml(w.id)}"
+                  aria-label="Edit ${escHtml(w.name)}">✏</button>
+          <button class="btn-icon danger" data-wdel="${escHtml(w.id)}"
+                  aria-label="Delete ${escHtml(w.name)}">🗑</button>
+        </div>`;
+    }).join('');
+
+    // Delegated listener — remove the previous one before attaching a new one
+    if (container._walletClickHandler) {
+      container.removeEventListener('click', container._walletClickHandler);
+    }
+    container._walletClickHandler = ev => {
+      const editBtn = ev.target.closest('[data-wedit]');
+      if (editBtn) {
+        closeModal('modal-wallets');
+        openEditWalletModal(editBtn.dataset.wedit);
+        return;
+      }
+      const delBtn = ev.target.closest('[data-wdel]');
+      if (delBtn) { handleDeleteWallet(delBtn.dataset.wdel); return; }
+
+      const wConfirm = ev.target.closest('[data-wdel-confirm]');
+      if (wConfirm) { doDeleteWallet(wConfirm.dataset.wdelConfirm); return; }
+
+      const wCancel = ev.target.closest('[data-wdel-cancel]');
+      if (wCancel) { cancelDeleteWallet(wCancel.dataset.wdelCancel); return; }
+
+      const row = ev.target.closest('[data-wswitch]');
+      if (row) {
+        setActiveWallet(row.dataset.wswitch);
+        // Reset filter state so the new wallet's history isn't pre-filtered
+        // by whatever was active on the previous wallet.
+        _searchQuery    = '';
+        _filterType     = 'all';
+        _filterCategory = '';
+        _filterOpen     = false;
+        _lastBalance    = null;   // prevent spurious balance pop-animation on switch
+        const filterInput = document.getElementById('filter-input');
+        if (filterInput) filterInput.value = '';
+        const filterCat = document.getElementById('filter-category');
+        if (filterCat) filterCat.value = '';   // sync DOM — state already cleared above
+        const filterPanel = document.getElementById('filter-panel');
+        if (filterPanel) filterPanel.classList.add('hidden');
+        const filterToggle = document.getElementById('btn-filter-toggle');
+        if (filterToggle) {
+          filterToggle.classList.remove('is-open', 'has-filters');
+          filterToggle.setAttribute('aria-expanded', 'false');
+        }
+        document.querySelectorAll('#filter-panel [data-ftype]').forEach(b =>
+          b.classList.toggle('active', b.dataset.ftype === 'all'));
+        closeModal('modal-wallets');
+        renderApp();
+      }
+    };
+    container.addEventListener('click', container._walletClickHandler);
+  }
+
+  // ── Delete wallet ─────────────────────────────────────────────
+  function handleDeleteWallet (id) {
+    const wallet  = loadWallets().find(w => w.id === id);
+    if (!wallet) return;
+    const txCount = loadTransactions().filter(t => t.walletId === id).length;
+
+    const delBtn = document.querySelector(`[data-wdel="${CSS.escape(id)}"]`);
+    if (!delBtn) return;
+    const item = delBtn.closest('.wallet-item');
+    if (!item) return;
+
+    item.classList.add('is-confirming');
+    const txNote = txCount > 0
+      ? `<span class="wallet-confirm-note">Removes ${txCount} transaction${txCount === 1 ? '' : 's'}.</span>`
+      : '';
+    // Swap the ✏ / 🗑 buttons for Cancel / Delete
+    item.querySelector('[data-wedit]').remove();
+    delBtn.remove();
+    item.insertAdjacentHTML('beforeend', `
+      ${txNote}
+      <button class="btn-confirm-cancel" data-wdel-cancel="${escHtml(id)}">Cancel</button>
+      <button class="btn-confirm-delete" data-wdel-confirm="${escHtml(id)}">Delete</button>`);
+    item.querySelector('[data-wdel-confirm]').focus();
+  }
+
+  function cancelDeleteWallet (_id) { renderWalletList(); }
+
+  function doDeleteWallet (id) {
+    const wallet = loadWallets().find(w => w.id === id);
+    if (!wallet) return;
+    if (deleteWallet(id)) {
+      showToast(`"${wallet.name}" deleted`);
+      renderWalletList();
+      renderApp();
+    }
+  }
+
+  // ── "Add New Wallet" button in the wallets modal ──────────────
+  document.getElementById('btn-new-wallet')
+    .addEventListener('click', () => {
+      closeModal('modal-wallets');
+      openCreateWalletModal();
+    });
+
+
+  /* ══════════════════════════════════════════════════════════════
+     §14  EXPORT PICKER MODAL
+     openExportModal     — renders checklist, opens modal
+     renderExportList    — one checkbox row per wallet
+     btn-export-toggle-all — Select all / Deselect all
+     btn-export-selected — downloads one file per checked wallet,
+                           staggered 400 ms apart so browsers don't
+                           block simultaneous download attempts
+  ══════════════════════════════════════════════════════════════ */
+
+  function openExportModal () {
+    renderExportList();
+    openModal('modal-export');
+  }
+
+  function renderExportList () {
+    const wallets   = loadWallets();
+    const container = document.getElementById('export-wallet-list');
+    const exportBtn = document.getElementById('btn-export-selected');
+    const toggleBtn = document.getElementById('btn-export-toggle-all');
+
+    if (!wallets.length) {
+      container.innerHTML =
+        '<p style="color:var(--muted);font-size:0.875rem;">No wallets found.</p>';
+      exportBtn.disabled = true;
+      return;
+    }
+
+    const allTxns    = loadTransactions();
+    container.innerHTML = wallets.map(w => {
+      const txCount  = allTxns.filter(t => t.walletId === w.id).length;
+      const isActive = w.id === _activeWalletId;
+      const meta     = txCount === 0
+        ? 'No transactions'
+        : `${txCount} transaction${txCount !== 1 ? 's' : ''}`;
+
+      // Pre-check the currently active wallet
+      return `
+        <label class="export-wallet-row">
+          <input type="checkbox" class="export-cb" value="${escHtml(w.id)}"
+                 ${isActive ? 'checked' : ''}>
+          <div class="export-check-body">
+            <div class="export-check-name">${escHtml(w.name)}</div>
+            <div class="export-check-meta">${meta}</div>
+          </div>
+        </label>`;
+    }).join('');
+
+    // Sync button label whenever a checkbox changes
+    function syncBtn () {
+      const checked = container.querySelectorAll('.export-cb:checked');
+      const n       = checked.length;
+      exportBtn.disabled   = n === 0;
+      exportBtn.textContent = n > 0
+        ? `Export ${n} Wallet${n > 1 ? 's' : ''}`
+        : 'Export';
+
+      // Toggle-all button label reflects current state
+      const all = container.querySelectorAll('.export-cb');
+      toggleBtn.textContent = [...all].every(cb => cb.checked)
+        ? 'Deselect all' : 'Select all';
+    }
+
+    container.querySelectorAll('.export-cb')
+      .forEach(cb => cb.addEventListener('change', syncBtn));
+
+    syncBtn();   // run once to reflect the pre-checked active wallet
+  }
+
+  // "Select all / Deselect all" toggle
+  document.getElementById('btn-export-toggle-all')
+    .addEventListener('click', () => {
+      const cbs      = document.querySelectorAll('.export-cb');
+      const allOn    = [...cbs].every(cb => cb.checked);
+      cbs.forEach(cb => { cb.checked = !allOn; });
+      cbs[0]?.dispatchEvent(new Event('change'));
+    });
+
+  // Download one file per checked wallet, staggered to avoid browser blocks
+  document.getElementById('btn-export-selected')
+    .addEventListener('click', () => {
+      const selected = [...document.querySelectorAll('.export-cb:checked')]
+        .map(cb => cb.value);
+      if (!selected.length) return;
+
+      const wallets  = loadWallets();
+      const allTxns  = loadTransactions();   // one load shared by skip-check and buildCsv
+      let queued     = 0;
+      let skipped    = 0;
+
+      selected.forEach((walletId, i) => {
+        const wallet = wallets.find(w => w.id === walletId);
+        if (!wallet) return;
+
+        const txns = allTxns.filter(t => t.walletId === walletId);
+        if (txns.length === 0) { skipped++; return; }
+
+        queued++;
+        setTimeout(() => {
+          const slug     = wallet.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+          const filename = `money-tracker-${slug}-${todayStr()}.csv`;
+          downloadCsv(buildCsv(walletId, allTxns), filename);
+        }, (queued - 1) * 400);   // 400 ms gap between each download
+      });
+
+      closeModal('modal-export');
+
+      if (queued === 0) {
+        showToast('Selected wallets have no transactions to export.', true);
+      } else {
+        const skipNote = skipped > 0 ? ` (${skipped} empty skipped)` : '';
+        showToast(`✓ Downloading ${queued} file${queued > 1 ? 's' : ''}…${skipNote}`);
+      }
+    });
+
+  // Close export modal
+  document.getElementById('btn-modal-export-close')
+    .addEventListener('click', () => closeModal('modal-export'));
+  document.getElementById('modal-export')
+    .addEventListener('click', ev => {
+      if (ev.target === ev.currentTarget) closeModal('modal-export');
+    });
+  </script>
+
+  <!-- Hidden file input for restore — triggered programmatically -->
+  <input type="file" id="restore-file-input" accept=".json,application/json"
+         aria-hidden="true" tabindex="-1"
+         style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+</body>
+</html>
